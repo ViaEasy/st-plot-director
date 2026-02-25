@@ -299,6 +299,17 @@ async function onGenerationEnded() {
     }
 
     if (settings.currentRound >= settings.rounds) {
+        return;
+    }
+
+    await runDirectorRound();
+}
+
+async function runDirectorRound() {
+    const settings = getSettings();
+
+    if (!settings.running || isProcessing) return;
+    if (settings.currentRound >= settings.rounds) {
         stopDirector(settings);
         return;
     }
@@ -352,8 +363,6 @@ async function onGenerationEnded() {
             log(`All ${settings.rounds} rounds completed.`);
         }
 
-        // isProcessing stays true until Generate completes and triggers GENERATION_ENDED again
-        // At that point, the next GENERATION_ENDED call will see isProcessing = false
         isProcessing = false;
         updateStatusUI(settings);
 
@@ -370,7 +379,7 @@ async function onGenerationEnded() {
     }
 }
 
-function startDirector(settings) {
+async function startDirector(settings) {
     if (!settings.enabled) {
         toastr.warning('Please enable Plot Director first.');
         return;
@@ -389,8 +398,10 @@ function startDirector(settings) {
     saveSettings();
 
     log(`Director started. Will run for ${settings.rounds} rounds.`);
-    log('Tip: Send a message to start the first AI generation, then the director will take over.');
-    toastr.info('Plot Director started. Send a message to begin.', '', { timeOut: 5000 });
+    toastr.info('Plot Director started.');
+
+    // Immediately kick off the first round
+    await runDirectorRound();
 }
 
 function stopDirector(settings) {
@@ -669,6 +680,18 @@ function bindPresetUI(settings) {
         const preset = getCurrentPreset(settings);
         if (preset) {
             exportPreset(preset);
+        } else {
+            toastr.warning('No preset selected.');
+        }
+    });
+
+    // Save preset
+    document.getElementById('st_pd_preset_save')?.addEventListener('click', () => {
+        const preset = getCurrentPreset(settings);
+        if (preset && promptEl) {
+            preset.system_prompt = promptEl.value;
+            saveSettings();
+            toastr.success(`Preset "${settings.selectedPreset}" saved.`);
         } else {
             toastr.warning('No preset selected.');
         }
