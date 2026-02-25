@@ -19,7 +19,7 @@ SillyTavern 自动剧情指导插件。AI 对话完成后，自动调用独立 L
 
 ```bash
 cd SillyTavern/data/default-user/extensions/third-party
-git clone https://github.com/YOUR_USERNAME/st-plot-director.git
+git clone https://github.com/ViaEasy/st-plot-director.git
 ```
 
 重启 SillyTavern，在扩展面板中即可看到 **Plot Director**。
