@@ -136,3 +136,34 @@
 .st-pd-toggle-key:hover {
     opacity: 1;
 }
+
+.st-pd-log-textarea {
+    width: 100%;
+    resize: vertical;
+    font-family: monospace;
+    font-size: 11px;
+    line-height: 1.4;
+    box-sizing: border-box;
+    white-space: pre;
+    overflow-wrap: normal;
+    overflow-x: auto;
+}
+
+.st-pd-llm-output {
+    width: 100%;
+    resize: vertical;
+    font-size: 12px;
+    line-height: 1.5;
+    box-sizing: border-box;
+}
+
+.st-pd-status.generating {
+    background: rgba(33, 150, 243, 0.2);
+    color: #2196f3;
+    animation: st-pd-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes st-pd-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}

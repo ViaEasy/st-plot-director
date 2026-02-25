@@ -36,6 +36,29 @@ const defaultSettings = Object.freeze({
 
 let isProcessing = false;
 
+// ---- Logging ----
+
+const logEntries = [];
+
+function log(message) {
+    const time = new Date().toLocaleTimeString();
+    const entry = `[${time}] ${message}`;
+    logEntries.push(entry);
+    const el = document.getElementById('st_pd_log');
+    if (el) {
+        el.value = logEntries.join('\n');
+        el.scrollTop = el.scrollHeight;
+    }
+    console.log(`[PlotDirector] ${message}`);
+}
+
+function showLLMOutput(text) {
+    const el = document.getElementById('st_pd_llm_output');
+    if (el) el.value = text;
+}
+
+// ---- Settings ----
+
 function getSettings() {
     const context = SillyTavern.getContext();
     const ext = context.extensionSettings;
@@ -62,7 +85,11 @@ function updateStatusUI(settings) {
     const progressEl = document.getElementById('st_pd_progress');
     if (!statusEl || !progressEl) return;
 
-    if (settings.running) {
+    if (isProcessing) {
+        statusEl.textContent = 'Generating...';
+        statusEl.className = 'st-pd-status generating';
+        progressEl.textContent = `Round ${settings.currentRound} / ${settings.rounds}`;
+    } else if (settings.running) {
         statusEl.textContent = 'Running';
         statusEl.className = 'st-pd-status running';
         progressEl.textContent = `Round ${settings.currentRound} / ${settings.rounds}`;
@@ -108,12 +135,10 @@ function buildMessages(settings) {
 
     const messages = [];
 
-    // System prompt from preset
     if (preset && preset.system_prompt) {
         messages.push({ role: 'system', content: preset.system_prompt });
     }
 
-    // Plot outline
     if (settings.outlineEnabled && settings.outline.trim()) {
         messages.push({
             role: 'system',
@@ -121,7 +146,6 @@ function buildMessages(settings) {
         });
     }
 
-    // Collect recent chat messages
     const recentChat = chat.slice(-settings.contextLength);
     let chatText = '';
     for (const msg of recentChat) {
@@ -191,7 +215,7 @@ async function showPreviewPopup(text) {
         return textarea ? textarea.value : text;
     }
 
-    return null; // User skipped
+    return null;
 }
 
 function escapeHtml(str) {
@@ -203,7 +227,15 @@ function escapeHtml(str) {
 async function onGenerationEnded() {
     const settings = getSettings();
 
-    if (!settings.enabled || !settings.running || isProcessing) return;
+    if (!settings.enabled || !settings.running) {
+        return;
+    }
+
+    if (isProcessing) {
+        log('Skipped: already processing a direction.');
+        return;
+    }
+
     if (settings.currentRound >= settings.rounds) {
         stopDirector(settings);
         return;
@@ -213,27 +245,31 @@ async function onGenerationEnded() {
 
     try {
         settings.currentRound++;
+        log(`Round ${settings.currentRound}/${settings.rounds} - Calling director LLM...`);
         updateStatusUI(settings);
         saveSettings();
-
-        console.log(`[PlotDirector] Round ${settings.currentRound}/${settings.rounds} - Generating direction...`);
 
         const direction = await callDirectorLLM(settings);
 
         if (!direction || !direction.trim()) {
-            console.warn('[PlotDirector] Empty direction received, skipping.');
+            log('WARNING: Director LLM returned empty response. Skipping this round.');
+            toastr.warning('Director LLM returned empty response.');
             isProcessing = false;
+            updateStatusUI(settings);
             return;
         }
 
         let finalText = direction.trim();
+        log(`Director LLM responded (${finalText.length} chars).`);
+        showLLMOutput(finalText);
 
         if (settings.mode === 'preview') {
+            log('Preview mode: waiting for user confirmation...');
             const edited = await showPreviewPopup(finalText);
             if (edited === null) {
-                console.log('[PlotDirector] User skipped this round.');
+                log('User skipped this round.');
                 isProcessing = false;
-                // Check if we should continue
+                updateStatusUI(settings);
                 if (settings.currentRound >= settings.rounds) {
                     stopDirector(settings);
                 }
@@ -242,16 +278,16 @@ async function onGenerationEnded() {
             finalText = edited;
         }
 
-        console.log(`[PlotDirector] Sending direction as user message.`);
+        log('Sending direction as user message...');
         isProcessing = false;
+        updateStatusUI(settings);
         await sendAsUserAndGenerate(finalText);
-        // GENERATION_ENDED will fire again after AI responds, continuing the loop
 
         if (settings.currentRound >= settings.rounds) {
             stopDirector(settings);
         }
     } catch (err) {
-        console.error('[PlotDirector] Error:', err);
+        log(`ERROR: ${err.message}`);
         toastr.error(`Plot Director error: ${err.message}`);
         isProcessing = false;
         stopDirector(settings);
@@ -275,21 +311,27 @@ function startDirector(settings) {
     isProcessing = false;
     updateStatusUI(settings);
     saveSettings();
-    toastr.info(`Plot Director started. Will run for ${settings.rounds} rounds.`);
+
+    log(`Director started. Will run for ${settings.rounds} rounds.`);
+    log('Tip: Send a message to start the first AI generation, then the director will take over.');
+    toastr.info('Plot Director started. Send a message to begin.', '', { timeOut: 5000 });
 }
 
 function stopDirector(settings) {
+    const wasRunning = settings.running;
     settings.running = false;
     isProcessing = false;
     updateStatusUI(settings);
     saveSettings();
-    toastr.info('Plot Director stopped.');
+    if (wasRunning) {
+        log(`Director stopped. Completed ${settings.currentRound}/${settings.rounds} rounds.`);
+        toastr.info('Plot Director stopped.');
+    }
 }
 
 // ---- Settings Panel Binding ----
 
 function bindSettingsUI(settings) {
-    // Enable toggle
     const enabledEl = document.getElementById('st_pd_enabled');
     if (enabledEl) {
         enabledEl.checked = settings.enabled;
@@ -299,7 +341,6 @@ function bindSettingsUI(settings) {
         });
     }
 
-    // Mode
     const modeEl = document.getElementById('st_pd_mode');
     if (modeEl) {
         modeEl.value = settings.mode;
@@ -309,7 +350,6 @@ function bindSettingsUI(settings) {
         });
     }
 
-    // Rounds
     const roundsEl = document.getElementById('st_pd_rounds');
     if (roundsEl) {
         roundsEl.value = settings.rounds;
@@ -319,11 +359,9 @@ function bindSettingsUI(settings) {
         });
     }
 
-    // Start / Stop
     document.getElementById('st_pd_start')?.addEventListener('click', () => startDirector(settings));
     document.getElementById('st_pd_stop')?.addEventListener('click', () => stopDirector(settings));
 
-    // Connection mode
     const connEl = document.getElementById('st_pd_connection_mode');
     if (connEl) {
         connEl.value = settings.connectionMode;
@@ -333,7 +371,6 @@ function bindSettingsUI(settings) {
         });
     }
 
-    // API type
     const apiTypeEl = document.getElementById('st_pd_api_type');
     if (apiTypeEl) {
         apiTypeEl.value = settings.apiType;
@@ -343,7 +380,6 @@ function bindSettingsUI(settings) {
         });
     }
 
-    // API URL
     const apiUrlEl = document.getElementById('st_pd_api_url');
     if (apiUrlEl) {
         apiUrlEl.value = settings.apiUrl;
@@ -353,7 +389,6 @@ function bindSettingsUI(settings) {
         });
     }
 
-    // API Key
     const apiKeyEl = document.getElementById('st_pd_api_key');
     if (apiKeyEl) {
         apiKeyEl.value = settings.apiKey;
@@ -363,14 +398,12 @@ function bindSettingsUI(settings) {
         });
     }
 
-    // Toggle key visibility
     document.getElementById('st_pd_toggle_key')?.addEventListener('click', () => {
         if (apiKeyEl) {
             apiKeyEl.type = apiKeyEl.type === 'password' ? 'text' : 'password';
         }
     });
 
-    // Model
     const modelEl = document.getElementById('st_pd_model');
     if (modelEl) {
         modelEl.value = settings.model;
@@ -380,7 +413,6 @@ function bindSettingsUI(settings) {
         });
     }
 
-    // Temperature
     const tempEl = document.getElementById('st_pd_temperature');
     if (tempEl) {
         tempEl.value = settings.temperature;
@@ -390,7 +422,6 @@ function bindSettingsUI(settings) {
         });
     }
 
-    // Max tokens
     const maxTokEl = document.getElementById('st_pd_max_tokens');
     if (maxTokEl) {
         maxTokEl.value = settings.maxTokens;
@@ -400,7 +431,6 @@ function bindSettingsUI(settings) {
         });
     }
 
-    // Context length
     const ctxLenEl = document.getElementById('st_pd_context_length');
     if (ctxLenEl) {
         ctxLenEl.value = settings.contextLength;
@@ -410,19 +440,20 @@ function bindSettingsUI(settings) {
         });
     }
 
-    // Test connection
     document.getElementById('st_pd_test_connection')?.addEventListener('click', async () => {
         const context = SillyTavern.getContext();
+        log('Testing API connection...');
         toastr.info('Testing connection...');
         const result = await testConnection(settings, context.getRequestHeaders);
         if (result.success) {
+            log(`Connection test OK: ${result.message}`);
             toastr.success(result.message);
         } else {
+            log(`Connection test FAILED: ${result.message}`);
             toastr.error(result.message);
         }
     });
 
-    // Outline
     const outlineEnabledEl = document.getElementById('st_pd_outline_enabled');
     if (outlineEnabledEl) {
         outlineEnabledEl.checked = settings.outlineEnabled;
@@ -441,6 +472,29 @@ function bindSettingsUI(settings) {
         });
     }
 
+    // Log buttons
+    document.getElementById('st_pd_log_export')?.addEventListener('click', () => {
+        if (logEntries.length === 0) {
+            toastr.info('No log entries to export.');
+            return;
+        }
+        const blob = new Blob([logEntries.join('\n')], { type: 'text/plain' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `plot-director-log-${new Date().toISOString().replace(/:/g, '-')}.txt`;
+        a.click();
+        URL.revokeObjectURL(url);
+        log('Log exported.');
+    });
+
+    document.getElementById('st_pd_log_clear')?.addEventListener('click', () => {
+        logEntries.length = 0;
+        const el = document.getElementById('st_pd_log');
+        if (el) el.value = '';
+        toastr.info('Log cleared.');
+    });
+
     // Preset management
     bindPresetUI(settings);
 }
@@ -452,14 +506,12 @@ function bindPresetUI(settings) {
     populatePresetDropdown(settings);
     loadPresetToEditor(settings);
 
-    // Select preset
     selectEl?.addEventListener('change', () => {
         settings.selectedPreset = selectEl.value;
         loadPresetToEditor(settings);
         saveSettings();
     });
 
-    // Edit system prompt - save to current preset
     promptEl?.addEventListener('input', () => {
         const preset = getCurrentPreset(settings);
         if (preset) {
@@ -468,7 +520,6 @@ function bindPresetUI(settings) {
         }
     });
 
-    // New preset
     document.getElementById('st_pd_preset_new')?.addEventListener('click', async () => {
         const context = SillyTavern.getContext();
         const result = await context.callGenericPopup('Enter preset name:', context.POPUP_TYPE.INPUT);
@@ -488,7 +539,6 @@ function bindPresetUI(settings) {
         }
     });
 
-    // Delete preset
     document.getElementById('st_pd_preset_delete')?.addEventListener('click', async () => {
         const context = SillyTavern.getContext();
         if (!settings.selectedPreset) return;
@@ -505,7 +555,6 @@ function bindPresetUI(settings) {
         }
     });
 
-    // Import preset
     document.getElementById('st_pd_preset_import')?.addEventListener('click', async () => {
         try {
             const preset = await importPreset();
@@ -521,7 +570,6 @@ function bindPresetUI(settings) {
         }
     });
 
-    // Export preset
     document.getElementById('st_pd_preset_export')?.addEventListener('click', () => {
         const preset = getCurrentPreset(settings);
         if (preset) {
@@ -538,14 +586,11 @@ jQuery(async function () {
     const context = SillyTavern.getContext();
     const settings = getSettings();
 
-    // Determine extension URL for loading built-in presets
     const extensionUrl = `scripts/extensions/${EXTENSION_FOLDER}`;
 
-    // Initialize presets
     await initPresets(settings, extensionUrl);
     saveSettings();
 
-    // Load settings HTML
     const response = await fetch(`${extensionUrl}/settings.html`);
     if (!response.ok) {
         console.error('[PlotDirector] Failed to load settings HTML');
@@ -560,11 +605,9 @@ jQuery(async function () {
         container.appendChild(wrapper);
     }
 
-    // Bind UI
     bindSettingsUI(settings);
     updateStatusUI(settings);
 
-    // Ensure running state is reset on load
     if (settings.running) {
         settings.running = false;
         settings.currentRound = 0;
@@ -572,8 +615,7 @@ jQuery(async function () {
         updateStatusUI(settings);
     }
 
-    // Listen for generation end
     context.eventSource.on(context.eventTypes.GENERATION_ENDED, onGenerationEnded);
 
-    console.log('[PlotDirector] Extension loaded.');
+    log('Extension loaded.');
 });

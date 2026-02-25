@@ -125,4 +125,26 @@
 
         <textarea class="st-pd-outline-textarea text_pole" id="st_pd_outline" placeholder="Enter your plot outline here..."></textarea>
     </div>
+
+    <!-- LLM Output -->
+    <div class="st-pd-section">
+        <div class="st-pd-section-title">
+            <i class="fa-solid fa-robot"></i>
+            <span data-i18n="Director LLM Output">Director LLM Output</span>
+        </div>
+        <textarea class="st-pd-llm-output text_pole" id="st_pd_llm_output" rows="6" readonly placeholder="The latest director LLM response will appear here..."></textarea>
+    </div>
+
+    <!-- Log -->
+    <div class="st-pd-section">
+        <div class="st-pd-section-title">
+            <i class="fa-solid fa-terminal"></i>
+            <span data-i18n="Log">Log</span>
+        </div>
+        <div class="st-pd-btn-row" style="margin-bottom: 6px;">
+            <div class="menu_button" id="st_pd_log_export" data-i18n="Export Log">Export Log</div>
+            <div class="menu_button" id="st_pd_log_clear" data-i18n="Clear Log">Clear Log</div>
+        </div>
+        <textarea class="st-pd-log-textarea text_pole" id="st_pd_log" rows="12" readonly placeholder="Log output..."></textarea>
+    </div>
 </div>
