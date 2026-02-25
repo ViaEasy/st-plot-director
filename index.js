@@ -189,7 +189,7 @@ async function sendAsUserAndGenerate(text) {
 
     context.chat.push(message);
     context.addOneMessage(message);
-    await context.saveChatConditional();
+    await context.saveChat();
     await context.generate('normal', { automatic_trigger: true });
 }
 
