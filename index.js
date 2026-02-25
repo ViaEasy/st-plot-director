@@ -72,17 +72,28 @@ async function waitForChatu8Complete(settings) {
         return;
     }
 
-    // Give chatu8 time to start (auto-click has a delay)
-    await delay(2000);
+    const timeoutMs = (settings.chatu8Timeout || 300) * 1000;
+    const startTime = Date.now();
 
-    if (!fab.classList.contains('st-chatu8-fab-loading')) {
-        log('chatu8 not generating, continuing.');
+    // Phase 1: Poll for up to 15s waiting for chatu8 to START (loading class appears)
+    log('Waiting for chatu8 to start...');
+    const pollStartLimit = 15000;
+    let detected = false;
+    while (Date.now() - startTime < pollStartLimit) {
+        if (fab.classList.contains('st-chatu8-fab-loading')) {
+            detected = true;
+            break;
+        }
+        await delay(500);
+    }
+
+    if (!detected) {
+        log('chatu8 did not start within 15s, continuing.');
         return;
     }
 
-    log('Waiting for chatu8 to finish...');
-    const startTime = Date.now();
-    const timeoutMs = (settings.chatu8Timeout || 300) * 1000;
+    // Phase 2: Wait for chatu8 to FINISH (loading class removed)
+    log('chatu8 is generating, waiting for it to finish...');
 
     return new Promise((resolve) => {
         const observer = new MutationObserver(() => {
@@ -93,6 +104,14 @@ async function waitForChatu8Complete(settings) {
             }
         });
         observer.observe(fab, { attributes: true, attributeFilter: ['class'] });
+
+        // Also check immediately in case it already finished during setup
+        if (!fab.classList.contains('st-chatu8-fab-loading')) {
+            observer.disconnect();
+            log(`chatu8 finished (${((Date.now() - startTime) / 1000).toFixed(1)}s).`);
+            resolve();
+            return;
+        }
 
         setTimeout(() => {
             observer.disconnect();
@@ -328,13 +347,21 @@ async function onGenerationEnded() {
         }
 
         log('Sending direction as user message...');
+        const isLastRound = settings.currentRound >= settings.rounds;
+        if (isLastRound) {
+            log(`All ${settings.rounds} rounds completed.`);
+        }
+
+        // isProcessing stays true until Generate completes and triggers GENERATION_ENDED again
+        // At that point, the next GENERATION_ENDED call will see isProcessing = false
         isProcessing = false;
         updateStatusUI(settings);
-        await sendAsUserAndGenerate(finalText);
 
-        if (settings.currentRound >= settings.rounds) {
+        if (isLastRound) {
             stopDirector(settings);
         }
+
+        await sendAsUserAndGenerate(finalText);
     } catch (err) {
         log(`ERROR: ${err.message}`);
         toastr.error(`Plot Director error: ${err.message}`);
