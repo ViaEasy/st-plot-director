@@ -1,0 +1,579 @@
+/**
+ * st-plot-director - SillyTavern Plot Director Extension
+ *
+ * Automatically generates plot directions after each AI response
+ * and sends them as user messages to drive the narrative forward.
+ */
+
+import { generateViaProxy, generateDirect, testConnection } from './utils/api.js';
+import {
+    initPresets, getCurrentPreset, savePreset, deletePreset,
+    exportPreset, importPreset, getPresetNames,
+} from './utils/preset-manager.js';
+
+const MODULE_NAME = 'st-plot-director';
+const EXTENSION_FOLDER = `third-party/${MODULE_NAME}`;
+
+const defaultSettings = Object.freeze({
+    enabled: false,
+    mode: 'auto',
+    rounds: 5,
+    currentRound: 0,
+    running: false,
+    connectionMode: 'proxy',
+    apiType: 'openai',
+    apiUrl: '',
+    apiKey: '',
+    model: '',
+    temperature: 0.8,
+    maxTokens: 300,
+    contextLength: 20,
+    outlineEnabled: false,
+    outline: '',
+    presets: {},
+    selectedPreset: '',
+});
+
+let isProcessing = false;
+
+function getSettings() {
+    const context = SillyTavern.getContext();
+    const ext = context.extensionSettings;
+    if (!ext[MODULE_NAME]) {
+        ext[MODULE_NAME] = structuredClone(defaultSettings);
+    }
+    for (const key of Object.keys(defaultSettings)) {
+        if (!Object.hasOwn(ext[MODULE_NAME], key)) {
+            ext[MODULE_NAME][key] = defaultSettings[key];
+        }
+    }
+    return ext[MODULE_NAME];
+}
+
+function saveSettings() {
+    const context = SillyTavern.getContext();
+    context.saveSettingsDebounced();
+}
+
+// ---- UI Helpers ----
+
+function updateStatusUI(settings) {
+    const statusEl = document.getElementById('st_pd_status');
+    const progressEl = document.getElementById('st_pd_progress');
+    if (!statusEl || !progressEl) return;
+
+    if (settings.running) {
+        statusEl.textContent = 'Running';
+        statusEl.className = 'st-pd-status running';
+        progressEl.textContent = `Round ${settings.currentRound} / ${settings.rounds}`;
+    } else {
+        statusEl.textContent = 'Stopped';
+        statusEl.className = 'st-pd-status stopped';
+        progressEl.textContent = settings.currentRound > 0
+            ? `Completed ${settings.currentRound} / ${settings.rounds}`
+            : '';
+    }
+}
+
+function populatePresetDropdown(settings) {
+    const select = document.getElementById('st_pd_preset_select');
+    if (!select) return;
+    const names = getPresetNames(settings);
+    select.innerHTML = '';
+    for (const name of names) {
+        const opt = document.createElement('option');
+        opt.value = name;
+        opt.textContent = name;
+        if (name === settings.selectedPreset) opt.selected = true;
+        select.appendChild(opt);
+    }
+}
+
+function loadPresetToEditor(settings) {
+    const preset = getCurrentPreset(settings);
+    const textarea = document.getElementById('st_pd_system_prompt');
+    if (textarea && preset) {
+        textarea.value = preset.system_prompt || '';
+    } else if (textarea) {
+        textarea.value = '';
+    }
+}
+
+// ---- Core Logic ----
+
+function buildMessages(settings) {
+    const context = SillyTavern.getContext();
+    const chat = context.chat || [];
+    const preset = getCurrentPreset(settings);
+
+    const messages = [];
+
+    // System prompt from preset
+    if (preset && preset.system_prompt) {
+        messages.push({ role: 'system', content: preset.system_prompt });
+    }
+
+    // Plot outline
+    if (settings.outlineEnabled && settings.outline.trim()) {
+        messages.push({
+            role: 'system',
+            content: `[Plot Outline]\n${settings.outline.trim()}`,
+        });
+    }
+
+    // Collect recent chat messages
+    const recentChat = chat.slice(-settings.contextLength);
+    let chatText = '';
+    for (const msg of recentChat) {
+        if (msg.is_system && !msg.is_user) continue;
+        const name = msg.name || (msg.is_user ? 'User' : 'Character');
+        chatText += `${name}: ${msg.mes}\n\n`;
+    }
+
+    if (chatText) {
+        messages.push({ role: 'user', content: chatText.trim() });
+    }
+
+    messages.push({
+        role: 'user',
+        content: 'Based on the conversation above, generate the next plot direction.',
+    });
+
+    return messages;
+}
+
+async function callDirectorLLM(settings) {
+    const context = SillyTavern.getContext();
+    const messages = buildMessages(settings);
+
+    if (settings.connectionMode === 'proxy') {
+        return await generateViaProxy(messages, settings, context.getRequestHeaders);
+    } else {
+        return await generateDirect(messages, settings);
+    }
+}
+
+async function sendAsUserAndGenerate(text) {
+    const context = SillyTavern.getContext();
+    const message = {
+        name: context.name1,
+        is_user: true,
+        is_system: false,
+        send_date: new Date().toISOString(),
+        mes: text,
+    };
+
+    context.chat.push(message);
+    context.addOneMessage(message);
+    await context.saveChatConditional();
+    await context.generate('normal', { automatic_trigger: true });
+}
+
+async function showPreviewPopup(text) {
+    const context = SillyTavern.getContext();
+    const html = `
+        <div>
+            <p><b>Plot Director</b> generated the following direction:</p>
+            <textarea class="st-pd-preview-content text_pole">${escapeHtml(text)}</textarea>
+        </div>
+    `;
+
+    const popup = new context.Popup(html, context.POPUP_TYPE.CONFIRM, '', {
+        okButton: 'Send',
+        cancelButton: 'Skip',
+        wide: true,
+    });
+
+    const result = await popup.show();
+
+    if (result === context.Popup.RESULT?.AFFIRMATIVE || result === 1) {
+        const textarea = popup.dlg?.querySelector('.st-pd-preview-content');
+        return textarea ? textarea.value : text;
+    }
+
+    return null; // User skipped
+}
+
+function escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+}
+
+async function onGenerationEnded() {
+    const settings = getSettings();
+
+    if (!settings.enabled || !settings.running || isProcessing) return;
+    if (settings.currentRound >= settings.rounds) {
+        stopDirector(settings);
+        return;
+    }
+
+    isProcessing = true;
+
+    try {
+        settings.currentRound++;
+        updateStatusUI(settings);
+        saveSettings();
+
+        console.log(`[PlotDirector] Round ${settings.currentRound}/${settings.rounds} - Generating direction...`);
+
+        const direction = await callDirectorLLM(settings);
+
+        if (!direction || !direction.trim()) {
+            console.warn('[PlotDirector] Empty direction received, skipping.');
+            isProcessing = false;
+            return;
+        }
+
+        let finalText = direction.trim();
+
+        if (settings.mode === 'preview') {
+            const edited = await showPreviewPopup(finalText);
+            if (edited === null) {
+                console.log('[PlotDirector] User skipped this round.');
+                isProcessing = false;
+                // Check if we should continue
+                if (settings.currentRound >= settings.rounds) {
+                    stopDirector(settings);
+                }
+                return;
+            }
+            finalText = edited;
+        }
+
+        console.log(`[PlotDirector] Sending direction as user message.`);
+        isProcessing = false;
+        await sendAsUserAndGenerate(finalText);
+        // GENERATION_ENDED will fire again after AI responds, continuing the loop
+
+        if (settings.currentRound >= settings.rounds) {
+            stopDirector(settings);
+        }
+    } catch (err) {
+        console.error('[PlotDirector] Error:', err);
+        toastr.error(`Plot Director error: ${err.message}`);
+        isProcessing = false;
+        stopDirector(settings);
+    }
+}
+
+function startDirector(settings) {
+    if (!settings.enabled) {
+        toastr.warning('Please enable Plot Director first.');
+        return;
+    }
+
+    const preset = getCurrentPreset(settings);
+    if (!preset || !preset.system_prompt) {
+        toastr.warning('Please select a preset with a system prompt.');
+        return;
+    }
+
+    settings.running = true;
+    settings.currentRound = 0;
+    isProcessing = false;
+    updateStatusUI(settings);
+    saveSettings();
+    toastr.info(`Plot Director started. Will run for ${settings.rounds} rounds.`);
+}
+
+function stopDirector(settings) {
+    settings.running = false;
+    isProcessing = false;
+    updateStatusUI(settings);
+    saveSettings();
+    toastr.info('Plot Director stopped.');
+}
+
+// ---- Settings Panel Binding ----
+
+function bindSettingsUI(settings) {
+    // Enable toggle
+    const enabledEl = document.getElementById('st_pd_enabled');
+    if (enabledEl) {
+        enabledEl.checked = settings.enabled;
+        enabledEl.addEventListener('change', () => {
+            settings.enabled = enabledEl.checked;
+            saveSettings();
+        });
+    }
+
+    // Mode
+    const modeEl = document.getElementById('st_pd_mode');
+    if (modeEl) {
+        modeEl.value = settings.mode;
+        modeEl.addEventListener('change', () => {
+            settings.mode = modeEl.value;
+            saveSettings();
+        });
+    }
+
+    // Rounds
+    const roundsEl = document.getElementById('st_pd_rounds');
+    if (roundsEl) {
+        roundsEl.value = settings.rounds;
+        roundsEl.addEventListener('change', () => {
+            settings.rounds = parseInt(roundsEl.value) || 5;
+            saveSettings();
+        });
+    }
+
+    // Start / Stop
+    document.getElementById('st_pd_start')?.addEventListener('click', () => startDirector(settings));
+    document.getElementById('st_pd_stop')?.addEventListener('click', () => stopDirector(settings));
+
+    // Connection mode
+    const connEl = document.getElementById('st_pd_connection_mode');
+    if (connEl) {
+        connEl.value = settings.connectionMode;
+        connEl.addEventListener('change', () => {
+            settings.connectionMode = connEl.value;
+            saveSettings();
+        });
+    }
+
+    // API type
+    const apiTypeEl = document.getElementById('st_pd_api_type');
+    if (apiTypeEl) {
+        apiTypeEl.value = settings.apiType;
+        apiTypeEl.addEventListener('change', () => {
+            settings.apiType = apiTypeEl.value;
+            saveSettings();
+        });
+    }
+
+    // API URL
+    const apiUrlEl = document.getElementById('st_pd_api_url');
+    if (apiUrlEl) {
+        apiUrlEl.value = settings.apiUrl;
+        apiUrlEl.addEventListener('input', () => {
+            settings.apiUrl = apiUrlEl.value;
+            saveSettings();
+        });
+    }
+
+    // API Key
+    const apiKeyEl = document.getElementById('st_pd_api_key');
+    if (apiKeyEl) {
+        apiKeyEl.value = settings.apiKey;
+        apiKeyEl.addEventListener('input', () => {
+            settings.apiKey = apiKeyEl.value;
+            saveSettings();
+        });
+    }
+
+    // Toggle key visibility
+    document.getElementById('st_pd_toggle_key')?.addEventListener('click', () => {
+        if (apiKeyEl) {
+            apiKeyEl.type = apiKeyEl.type === 'password' ? 'text' : 'password';
+        }
+    });
+
+    // Model
+    const modelEl = document.getElementById('st_pd_model');
+    if (modelEl) {
+        modelEl.value = settings.model;
+        modelEl.addEventListener('input', () => {
+            settings.model = modelEl.value;
+            saveSettings();
+        });
+    }
+
+    // Temperature
+    const tempEl = document.getElementById('st_pd_temperature');
+    if (tempEl) {
+        tempEl.value = settings.temperature;
+        tempEl.addEventListener('change', () => {
+            settings.temperature = parseFloat(tempEl.value) || 0.8;
+            saveSettings();
+        });
+    }
+
+    // Max tokens
+    const maxTokEl = document.getElementById('st_pd_max_tokens');
+    if (maxTokEl) {
+        maxTokEl.value = settings.maxTokens;
+        maxTokEl.addEventListener('change', () => {
+            settings.maxTokens = parseInt(maxTokEl.value) || 300;
+            saveSettings();
+        });
+    }
+
+    // Context length
+    const ctxLenEl = document.getElementById('st_pd_context_length');
+    if (ctxLenEl) {
+        ctxLenEl.value = settings.contextLength;
+        ctxLenEl.addEventListener('change', () => {
+            settings.contextLength = parseInt(ctxLenEl.value) || 20;
+            saveSettings();
+        });
+    }
+
+    // Test connection
+    document.getElementById('st_pd_test_connection')?.addEventListener('click', async () => {
+        const context = SillyTavern.getContext();
+        toastr.info('Testing connection...');
+        const result = await testConnection(settings, context.getRequestHeaders);
+        if (result.success) {
+            toastr.success(result.message);
+        } else {
+            toastr.error(result.message);
+        }
+    });
+
+    // Outline
+    const outlineEnabledEl = document.getElementById('st_pd_outline_enabled');
+    if (outlineEnabledEl) {
+        outlineEnabledEl.checked = settings.outlineEnabled;
+        outlineEnabledEl.addEventListener('change', () => {
+            settings.outlineEnabled = outlineEnabledEl.checked;
+            saveSettings();
+        });
+    }
+
+    const outlineEl = document.getElementById('st_pd_outline');
+    if (outlineEl) {
+        outlineEl.value = settings.outline;
+        outlineEl.addEventListener('input', () => {
+            settings.outline = outlineEl.value;
+            saveSettings();
+        });
+    }
+
+    // Preset management
+    bindPresetUI(settings);
+}
+
+function bindPresetUI(settings) {
+    const selectEl = document.getElementById('st_pd_preset_select');
+    const promptEl = document.getElementById('st_pd_system_prompt');
+
+    populatePresetDropdown(settings);
+    loadPresetToEditor(settings);
+
+    // Select preset
+    selectEl?.addEventListener('change', () => {
+        settings.selectedPreset = selectEl.value;
+        loadPresetToEditor(settings);
+        saveSettings();
+    });
+
+    // Edit system prompt - save to current preset
+    promptEl?.addEventListener('input', () => {
+        const preset = getCurrentPreset(settings);
+        if (preset) {
+            preset.system_prompt = promptEl.value;
+            saveSettings();
+        }
+    });
+
+    // New preset
+    document.getElementById('st_pd_preset_new')?.addEventListener('click', async () => {
+        const context = SillyTavern.getContext();
+        const result = await context.callGenericPopup('Enter preset name:', context.POPUP_TYPE.INPUT);
+        if (result && typeof result === 'string' && result.trim()) {
+            const name = result.trim();
+            savePreset(settings, name, {
+                system_prompt: '',
+                temperature: settings.temperature,
+                max_tokens: settings.maxTokens,
+                model: '',
+            });
+            settings.selectedPreset = name;
+            populatePresetDropdown(settings);
+            loadPresetToEditor(settings);
+            saveSettings();
+            toastr.success(`Preset "${name}" created.`);
+        }
+    });
+
+    // Delete preset
+    document.getElementById('st_pd_preset_delete')?.addEventListener('click', async () => {
+        const context = SillyTavern.getContext();
+        if (!settings.selectedPreset) return;
+        const confirm = await context.callGenericPopup(
+            `Delete preset "${settings.selectedPreset}"?`,
+            context.POPUP_TYPE.CONFIRM,
+        );
+        if (confirm === 1 || confirm === true) {
+            deletePreset(settings, settings.selectedPreset);
+            populatePresetDropdown(settings);
+            loadPresetToEditor(settings);
+            saveSettings();
+            toastr.success('Preset deleted.');
+        }
+    });
+
+    // Import preset
+    document.getElementById('st_pd_preset_import')?.addEventListener('click', async () => {
+        try {
+            const preset = await importPreset();
+            const name = preset.name || 'Imported Preset';
+            savePreset(settings, name, preset);
+            settings.selectedPreset = name;
+            populatePresetDropdown(settings);
+            loadPresetToEditor(settings);
+            saveSettings();
+            toastr.success(`Preset "${name}" imported.`);
+        } catch (err) {
+            toastr.error(err.message);
+        }
+    });
+
+    // Export preset
+    document.getElementById('st_pd_preset_export')?.addEventListener('click', () => {
+        const preset = getCurrentPreset(settings);
+        if (preset) {
+            exportPreset(preset);
+        } else {
+            toastr.warning('No preset selected.');
+        }
+    });
+}
+
+// ---- Initialization ----
+
+jQuery(async function () {
+    const context = SillyTavern.getContext();
+    const settings = getSettings();
+
+    // Determine extension URL for loading built-in presets
+    const extensionUrl = `scripts/extensions/${EXTENSION_FOLDER}`;
+
+    // Initialize presets
+    await initPresets(settings, extensionUrl);
+    saveSettings();
+
+    // Load settings HTML
+    const response = await fetch(`${extensionUrl}/settings.html`);
+    if (!response.ok) {
+        console.error('[PlotDirector] Failed to load settings HTML');
+        return;
+    }
+    const html = await response.text();
+    const container = document.getElementById('extensions_settings2');
+    if (container) {
+        const wrapper = document.createElement('div');
+        wrapper.id = 'st_pd_container';
+        wrapper.innerHTML = html;
+        container.appendChild(wrapper);
+    }
+
+    // Bind UI
+    bindSettingsUI(settings);
+    updateStatusUI(settings);
+
+    // Ensure running state is reset on load
+    if (settings.running) {
+        settings.running = false;
+        settings.currentRound = 0;
+        saveSettings();
+        updateStatusUI(settings);
+    }
+
+    // Listen for generation end
+    context.eventSource.on(context.eventTypes.GENERATION_ENDED, onGenerationEnded);
+
+    console.log('[PlotDirector] Extension loaded.');
+});

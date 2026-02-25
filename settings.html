@@ -1,0 +1,128 @@
+<div class="st-pd-settings">
+    <!-- Basic Settings -->
+    <div class="st-pd-section">
+        <div class="st-pd-section-title">
+            <i class="fa-solid fa-clapperboard"></i>
+            <span data-i18n="Plot Director">Plot Director</span>
+        </div>
+
+        <div class="st-pd-row">
+            <label data-i18n="Enable">Enable</label>
+            <input type="checkbox" id="st_pd_enabled" />
+            <span class="st-pd-status stopped" id="st_pd_status" data-i18n="Stopped">Stopped</span>
+        </div>
+
+        <div class="st-pd-row">
+            <label data-i18n="Mode">Mode</label>
+            <select id="st_pd_mode">
+                <option value="auto" data-i18n="Full Auto">Full Auto</option>
+                <option value="preview" data-i18n="Preview & Confirm">Preview & Confirm</option>
+            </select>
+        </div>
+
+        <div class="st-pd-row">
+            <label data-i18n="Rounds">Rounds</label>
+            <input type="number" id="st_pd_rounds" min="1" max="100" value="5" />
+            <span class="st-pd-progress" id="st_pd_progress"></span>
+        </div>
+
+        <div class="st-pd-btn-row">
+            <div class="menu_button" id="st_pd_start" data-i18n="Start">Start</div>
+            <div class="menu_button" id="st_pd_stop" data-i18n="Stop">Stop</div>
+        </div>
+    </div>
+
+    <!-- API Configuration -->
+    <div class="st-pd-section">
+        <div class="st-pd-section-title">
+            <i class="fa-solid fa-plug"></i>
+            <span data-i18n="API Configuration">API Configuration</span>
+        </div>
+
+        <div class="st-pd-row">
+            <label data-i18n="Connection">Connection</label>
+            <select id="st_pd_connection_mode">
+                <option value="proxy" data-i18n="Via SillyTavern Proxy">Via SillyTavern Proxy</option>
+                <option value="direct" data-i18n="Direct Request">Direct Request</option>
+            </select>
+        </div>
+
+        <div class="st-pd-row">
+            <label data-i18n="API Type">API Type</label>
+            <select id="st_pd_api_type">
+                <option value="openai">OpenAI Compatible</option>
+                <option value="claude">Claude</option>
+            </select>
+        </div>
+
+        <div class="st-pd-row">
+            <label data-i18n="API URL">API URL</label>
+            <input type="text" id="st_pd_api_url" placeholder="https://api.openai.com/v1" />
+        </div>
+
+        <div class="st-pd-row">
+            <label data-i18n="API Key">API Key</label>
+            <div class="st-pd-api-key-wrapper">
+                <input type="password" id="st_pd_api_key" placeholder="sk-..." />
+                <i class="fa-solid fa-eye st-pd-toggle-key" id="st_pd_toggle_key"></i>
+            </div>
+        </div>
+
+        <div class="st-pd-row">
+            <label data-i18n="Model">Model</label>
+            <input type="text" id="st_pd_model" placeholder="gpt-4o-mini" />
+        </div>
+
+        <div class="st-pd-row">
+            <label data-i18n="Temperature">Temperature</label>
+            <input type="number" id="st_pd_temperature" min="0" max="2" step="0.1" value="0.8" />
+        </div>
+
+        <div class="st-pd-row">
+            <label data-i18n="Max Tokens">Max Tokens</label>
+            <input type="number" id="st_pd_max_tokens" min="50" max="4096" step="50" value="300" />
+        </div>
+
+        <div class="st-pd-row">
+            <label data-i18n="Context Messages">Context Messages</label>
+            <input type="number" id="st_pd_context_length" min="1" max="100" value="20" title="Number of recent messages to include" />
+        </div>
+
+        <div class="st-pd-btn-row">
+            <div class="menu_button" id="st_pd_test_connection" data-i18n="Test Connection">Test Connection</div>
+        </div>
+    </div>
+
+    <!-- Preset Management -->
+    <div class="st-pd-section">
+        <div class="st-pd-section-title">
+            <i class="fa-solid fa-sliders"></i>
+            <span data-i18n="System Prompt Preset">System Prompt Preset</span>
+        </div>
+
+        <div class="st-pd-preset-row">
+            <select id="st_pd_preset_select"></select>
+            <div class="menu_button" id="st_pd_preset_new" title="New"><i class="fa-solid fa-plus"></i></div>
+            <div class="menu_button" id="st_pd_preset_delete" title="Delete"><i class="fa-solid fa-trash"></i></div>
+            <div class="menu_button" id="st_pd_preset_import" title="Import"><i class="fa-solid fa-file-import"></i></div>
+            <div class="menu_button" id="st_pd_preset_export" title="Export"><i class="fa-solid fa-file-export"></i></div>
+        </div>
+
+        <textarea class="st-pd-textarea text_pole" id="st_pd_system_prompt" placeholder="Enter system prompt for the plot director LLM..."></textarea>
+    </div>
+
+    <!-- Plot Outline -->
+    <div class="st-pd-section">
+        <div class="st-pd-section-title">
+            <i class="fa-solid fa-scroll"></i>
+            <span data-i18n="Plot Outline">Plot Outline (Optional)</span>
+        </div>
+
+        <div class="st-pd-row">
+            <label data-i18n="Enable Outline">Enable Outline</label>
+            <input type="checkbox" id="st_pd_outline_enabled" />
+        </div>
+
+        <textarea class="st-pd-outline-textarea text_pole" id="st_pd_outline" placeholder="Enter your plot outline here..."></textarea>
+    </div>
+</div>
