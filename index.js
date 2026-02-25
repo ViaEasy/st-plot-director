@@ -30,6 +30,8 @@ const defaultSettings = Object.freeze({
     contextLength: 20,
     outlineEnabled: false,
     outline: '',
+    waitForChatu8: true,
+    chatu8Timeout: 300,
     presets: {},
     selectedPreset: '',
 });
@@ -58,6 +60,47 @@ function showLLMOutput(text) {
 }
 
 // ---- Settings ----
+
+function delay(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function waitForChatu8Complete(settings) {
+    const fab = document.getElementById('st-chatu8-fab');
+    if (!fab) {
+        log('chatu8 FAB not found, skipping wait.');
+        return;
+    }
+
+    // Give chatu8 time to start (auto-click has a delay)
+    await delay(2000);
+
+    if (!fab.classList.contains('st-chatu8-fab-loading')) {
+        log('chatu8 not generating, continuing.');
+        return;
+    }
+
+    log('Waiting for chatu8 to finish...');
+    const startTime = Date.now();
+    const timeoutMs = (settings.chatu8Timeout || 300) * 1000;
+
+    return new Promise((resolve) => {
+        const observer = new MutationObserver(() => {
+            if (!fab.classList.contains('st-chatu8-fab-loading')) {
+                observer.disconnect();
+                log(`chatu8 finished (${((Date.now() - startTime) / 1000).toFixed(1)}s).`);
+                resolve();
+            }
+        });
+        observer.observe(fab, { attributes: true, attributeFilter: ['class'] });
+
+        setTimeout(() => {
+            observer.disconnect();
+            log('WARNING: chatu8 wait timed out, continuing anyway.');
+            resolve();
+        }, timeoutMs);
+    });
+}
 
 function getSettings() {
     const context = SillyTavern.getContext();
@@ -245,10 +288,16 @@ async function onGenerationEnded() {
 
     try {
         settings.currentRound++;
-        log(`Round ${settings.currentRound}/${settings.rounds} - Calling director LLM...`);
+        log(`Round ${settings.currentRound}/${settings.rounds} - Starting...`);
         updateStatusUI(settings);
         saveSettings();
 
+        // Wait for chatu8 to finish image tag generation
+        if (settings.waitForChatu8) {
+            await waitForChatu8Complete(settings);
+        }
+
+        log('Calling director LLM...');
         const direction = await callDirectorLLM(settings);
 
         if (!direction || !direction.trim()) {
@@ -361,6 +410,25 @@ function bindSettingsUI(settings) {
 
     document.getElementById('st_pd_start')?.addEventListener('click', () => startDirector(settings));
     document.getElementById('st_pd_stop')?.addEventListener('click', () => stopDirector(settings));
+
+    // chatu8 wait
+    const waitChatu8El = document.getElementById('st_pd_wait_chatu8');
+    if (waitChatu8El) {
+        waitChatu8El.checked = settings.waitForChatu8;
+        waitChatu8El.addEventListener('change', () => {
+            settings.waitForChatu8 = waitChatu8El.checked;
+            saveSettings();
+        });
+    }
+
+    const chatu8TimeoutEl = document.getElementById('st_pd_chatu8_timeout');
+    if (chatu8TimeoutEl) {
+        chatu8TimeoutEl.value = settings.chatu8Timeout;
+        chatu8TimeoutEl.addEventListener('change', () => {
+            settings.chatu8Timeout = parseInt(chatu8TimeoutEl.value) || 300;
+            saveSettings();
+        });
+    }
 
     const connEl = document.getElementById('st_pd_connection_mode');
     if (connEl) {
