@@ -8,7 +8,7 @@
 import { generateViaProxy, generateDirect, testConnection } from './utils/api.js';
 import {
     initPresets, getCurrentPreset, savePreset, deletePreset,
-    exportPreset, importPreset, getPresetNames,
+    exportPreset, importPreset, getPresetNames, getDefaultPromptManagerConfig,
 } from './utils/preset-manager.js';
 
 const MODULE_NAME = 'st-plot-director';
@@ -41,18 +41,29 @@ const defaultSettings = Object.freeze({
 });
 
 let isProcessing = false;
+let currentAbortController = null;
+let eventsBound = false;
 
 // ---- Logging ----
 
+const MAX_LOG_ENTRIES = 500;
 const logEntries = [];
 
 function log(message) {
     const time = new Date().toLocaleTimeString();
     const entry = `[${time}] ${message}`;
+    if (logEntries.length >= MAX_LOG_ENTRIES) {
+        logEntries.shift();
+    }
     logEntries.push(entry);
     const el = document.getElementById('st_pd_log');
     if (el) {
-        el.value = logEntries.join('\n');
+        // Append new entry instead of re-joining entire array
+        if (el.value) {
+            el.value += '\n' + entry;
+        } else {
+            el.value = entry;
+        }
         el.scrollTop = el.scrollHeight;
     }
     console.log(`[PlotDirector] ${message}`);
@@ -256,18 +267,6 @@ function extractApiConfig(settings) {
 
 // ---- Core Logic ----
 
-function getDefaultPromptManagerConfig() {
-    return {
-        chatHistoryMode: 'role',
-        blocks: [
-            { id: 'system_prompt', type: 'fixed', role: 'system', label: 'System Prompt', enabled: true, content: null },
-            { id: 'plot_outline', type: 'fixed', role: 'system', label: 'Plot Outline', enabled: true, content: null },
-            { id: 'chat_history', type: 'fixed', role: 'special', label: 'Chat History', enabled: true, content: null },
-            { id: 'instruction', type: 'fixed', role: 'user', label: 'Instruction', enabled: true, content: 'Based on the conversation above, generate the next plot direction.' },
-        ],
-    };
-}
-
 function buildChatHistory(chat, settings, mode) {
     const recentChat = chat.slice(-settings.contextLength);
     const filtered = recentChat.filter(msg => !(msg.is_system && !msg.is_user));
@@ -350,16 +349,17 @@ function buildMessages(settings) {
     return messages;
 }
 
-async function callDirectorLLM(settings) {
+async function callDirectorLLM(settings, signal) {
     const context = SillyTavern.getContext();
     const messages = buildMessages(settings);
 
     showInputLog(messages);
 
+    const options = { signal };
     if (settings.connectionMode === 'proxy') {
-        return await generateViaProxy(messages, settings, context.getRequestHeaders);
+        return await generateViaProxy(messages, settings, context.getRequestHeaders, options);
     } else {
-        return await generateDirect(messages, settings);
+        return await generateDirect(messages, settings, options);
     }
 }
 
@@ -381,14 +381,16 @@ async function sendAsUserAndGenerate(text) {
 
 async function showPreviewPopup(text) {
     const context = SillyTavern.getContext();
-    const html = `
-        <div>
-            <p><b>Plot Director</b> generated the following direction:</p>
-            <textarea class="st-pd-preview-content text_pole">${escapeHtml(text)}</textarea>
-        </div>
-    `;
+    const container = document.createElement('div');
+    const label = document.createElement('p');
+    label.innerHTML = '<b>Plot Director</b> generated the following direction:';
+    const textarea = document.createElement('textarea');
+    textarea.className = 'st-pd-preview-content text_pole';
+    textarea.value = text;
+    container.appendChild(label);
+    container.appendChild(textarea);
 
-    const popup = new context.Popup(html, context.POPUP_TYPE.CONFIRM, '', {
+    const popup = new context.Popup(container, context.POPUP_TYPE.CONFIRM, '', {
         okButton: 'Send',
         cancelButton: 'Skip',
         wide: true,
@@ -397,8 +399,8 @@ async function showPreviewPopup(text) {
     const result = await popup.show();
 
     if (result === context.Popup.RESULT?.AFFIRMATIVE || result === 1) {
-        const textarea = popup.dlg?.querySelector('.st-pd-preview-content');
-        return textarea ? textarea.value : text;
+        const ta = popup.dlg?.querySelector('.st-pd-preview-content');
+        return ta ? ta.value : text;
     }
 
     return null;
@@ -438,6 +440,11 @@ async function runDirectorRound() {
         return;
     }
 
+    if (currentAbortController) {
+        currentAbortController.abort();
+    }
+    currentAbortController = new AbortController();
+
     isProcessing = true;
 
     try {
@@ -451,8 +458,13 @@ async function runDirectorRound() {
             await waitForChatu8Complete(settings);
         }
 
+        if (!settings.running) {
+            log('Director stopped before LLM call, skipping this round.');
+            return;
+        }
+
         log('Calling director LLM...');
-        const direction = await callDirectorLLM(settings);
+        const direction = await callDirectorLLM(settings, currentAbortController.signal);
 
         if (!direction || !direction.trim()) {
             log('WARNING: Director LLM returned empty response. Skipping this round.');
@@ -492,6 +504,11 @@ async function runDirectorRound() {
             finalText = edited;
         }
 
+        if (!settings.running) {
+            log('Director stopped before sending user message, skipping send.');
+            return;
+        }
+
         log('Sending direction as user message...');
         const isLastRound = settings.currentRound >= settings.rounds;
         if (isLastRound) {
@@ -507,10 +524,18 @@ async function runDirectorRound() {
 
         await sendAsUserAndGenerate(finalText);
     } catch (err) {
-        log(`ERROR: ${err.message}`);
-        toastr.error(`Plot Director error: ${err.message}`);
+        if (err.name === 'AbortError') {
+            log('Director LLM request aborted.');
+        } else {
+            log(`ERROR: ${err.message}`);
+            toastr.error(`Plot Director error: ${err.message}`);
+        }
         isProcessing = false;
         stopDirector(settings);
+    } finally {
+        if (currentAbortController?.signal?.aborted) {
+            currentAbortController = null;
+        }
     }
 }
 
@@ -523,6 +548,20 @@ async function startDirector(settings) {
     const preset = getCurrentPreset(settings);
     if (!preset || !preset.system_prompt) {
         toastr.warning('Please select a preset with a system prompt.');
+        return;
+    }
+
+    if (settings.connectionMode === 'direct') {
+        if (!settings.apiUrl?.trim()) {
+            toastr.warning('Please set an API URL for direct connection mode.');
+            return;
+        }
+        if (!settings.model?.trim()) {
+            toastr.warning('Please set a model name.');
+            return;
+        }
+    } else if (!settings.model?.trim()) {
+        toastr.warning('Please set a model name.');
         return;
     }
 
@@ -543,6 +582,10 @@ function stopDirector(settings) {
     const wasRunning = settings.running;
     settings.running = false;
     isProcessing = false;
+    if (currentAbortController) {
+        currentAbortController.abort();
+        currentAbortController = null;
+    }
     updateStatusUI(settings);
     saveSettings();
     if (wasRunning) {
@@ -952,10 +995,11 @@ function bindSettingsUI(settings) {
         saveSettings();
     });
 
-    document.getElementById('st_pd_api_config_save')?.addEventListener('click', () => {
-        const name = prompt('Enter a name for this API configuration:');
-        if (!name || !name.trim()) return;
-        const trimmed = name.trim();
+    document.getElementById('st_pd_api_config_save')?.addEventListener('click', async () => {
+        const context = SillyTavern.getContext();
+        const result = await context.callGenericPopup('Enter a name for this API configuration:', context.POPUP_TYPE.INPUT);
+        if (!result || typeof result !== 'string' || !result.trim()) return;
+        const trimmed = result.trim();
         if (!settings.apiConfigs) settings.apiConfigs = {};
         settings.apiConfigs[trimmed] = extractApiConfig(settings);
         settings.selectedApiConfig = trimmed;
@@ -964,13 +1008,18 @@ function bindSettingsUI(settings) {
         toastr.success(`API config "${trimmed}" saved.`);
     });
 
-    document.getElementById('st_pd_api_config_delete')?.addEventListener('click', () => {
+    document.getElementById('st_pd_api_config_delete')?.addEventListener('click', async () => {
+        const context = SillyTavern.getContext();
         const name = settings.selectedApiConfig;
         if (!name) {
             toastr.warning('No API config selected.');
             return;
         }
-        if (!confirm(`Delete API config "${name}"?`)) return;
+        const confirmResult = await context.callGenericPopup(
+            `Delete API config "${name}"?`,
+            context.POPUP_TYPE.CONFIRM,
+        );
+        if (confirmResult !== 1 && confirmResult !== true) return;
         delete settings.apiConfigs[name];
         const remaining = Object.keys(settings.apiConfigs);
         settings.selectedApiConfig = remaining.length > 0 ? remaining[0] : '';
@@ -1112,8 +1161,16 @@ function bindPresetUI(settings) {
 
     document.getElementById('st_pd_preset_import')?.addEventListener('click', async () => {
         try {
+            const context = SillyTavern.getContext();
             const preset = await importPreset();
             const name = preset.name || 'Imported Preset';
+            if (settings.presets[name]) {
+                const confirmResult = await context.callGenericPopup(
+                    `Preset "${name}" already exists. Overwrite?`,
+                    context.POPUP_TYPE.CONFIRM,
+                );
+                if (confirmResult !== 1 && confirmResult !== true) return;
+            }
             savePreset(settings, name, preset);
             settings.selectedPreset = name;
             populatePresetDropdown(settings);
@@ -1122,7 +1179,9 @@ function bindPresetUI(settings) {
             saveSettings();
             toastr.success(`Preset "${name}" imported.`);
         } catch (err) {
-            toastr.error(err.message);
+            if (err.message !== 'File selection cancelled') {
+                toastr.error(err.message);
+            }
         }
     });
 
@@ -1152,39 +1211,48 @@ function bindPresetUI(settings) {
 // ---- Initialization ----
 
 jQuery(async function () {
-    const context = SillyTavern.getContext();
-    const settings = getSettings();
+    try {
+        const context = SillyTavern.getContext();
+        const settings = getSettings();
 
-    const extensionUrl = `scripts/extensions/${EXTENSION_FOLDER}`;
+        const extensionUrl = `scripts/extensions/${EXTENSION_FOLDER}`;
 
-    await initPresets(settings, extensionUrl);
-    saveSettings();
-
-    const response = await fetch(`${extensionUrl}/settings.html`);
-    if (!response.ok) {
-        console.error('[PlotDirector] Failed to load settings HTML');
-        return;
-    }
-    const html = await response.text();
-    const container = document.getElementById('extensions_settings2');
-    if (container) {
-        const wrapper = document.createElement('div');
-        wrapper.id = 'st_pd_container';
-        wrapper.innerHTML = html;
-        container.appendChild(wrapper);
-    }
-
-    bindSettingsUI(settings);
-    updateStatusUI(settings);
-
-    if (settings.running) {
-        settings.running = false;
-        settings.currentRound = 0;
+        await initPresets(settings, extensionUrl);
         saveSettings();
+
+        const response = await fetch(`${extensionUrl}/settings.html`);
+        if (!response.ok) {
+            console.error('[PlotDirector] Failed to load settings HTML');
+            toastr.error('Plot Director: Failed to load settings UI');
+            return;
+        }
+        const html = await response.text();
+        const container = document.getElementById('extensions_settings2');
+        if (container) {
+            const wrapper = document.createElement('div');
+            wrapper.id = 'st_pd_container';
+            wrapper.innerHTML = html;
+            container.appendChild(wrapper);
+        }
+
+        bindSettingsUI(settings);
         updateStatusUI(settings);
+
+        if (settings.running) {
+            settings.running = false;
+            settings.currentRound = 0;
+            saveSettings();
+            updateStatusUI(settings);
+        }
+
+        if (!eventsBound) {
+            context.eventSource.on(context.eventTypes.GENERATION_ENDED, onGenerationEnded);
+            eventsBound = true;
+        }
+
+        log('Extension loaded.');
+    } catch (err) {
+        console.error('[PlotDirector] Initialization failed:', err);
+        toastr.error(`Plot Director initialization failed: ${err.message}`);
     }
-
-    context.eventSource.on(context.eventTypes.GENERATION_ENDED, onGenerationEnded);
-
-    log('Extension loaded.');
 });

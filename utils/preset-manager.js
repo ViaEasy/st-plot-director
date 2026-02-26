@@ -56,6 +56,19 @@ const DEFAULT_PM_BLOCKS = [
 ];
 
 /**
+ * Default prompt manager config.
+ * Shared single source of truth for index.js and preset migration.
+ * @param {string} [chatHistoryMode='role'] - Chat history mode
+ * @returns {object} Default prompt manager config
+ */
+export function getDefaultPromptManagerConfig(chatHistoryMode = 'role') {
+    return {
+        chatHistoryMode,
+        blocks: structuredClone(DEFAULT_PM_BLOCKS),
+    };
+}
+
+/**
  * Ensure a preset has a valid prompt_manager config.
  * Creates default config if missing (lazy migration).
  * @param {object} preset - Preset to check
@@ -63,10 +76,7 @@ const DEFAULT_PM_BLOCKS = [
 export function ensurePromptManagerConfig(preset) {
     if (!preset) return;
     if (preset.prompt_manager) return;
-    preset.prompt_manager = {
-        chatHistoryMode: 'text',
-        blocks: structuredClone(DEFAULT_PM_BLOCKS),
-    };
+    preset.prompt_manager = getDefaultPromptManagerConfig('text');
 }
 
 /**
@@ -145,6 +155,9 @@ export function importPreset() {
                 reject(new Error(`Failed to parse preset: ${err.message}`));
             }
         };
+        input.addEventListener('cancel', () => {
+            reject(new Error('File selection cancelled'));
+        });
         input.click();
     });
 }

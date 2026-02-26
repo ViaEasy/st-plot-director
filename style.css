@@ -173,8 +173,8 @@
 .st-pd-settings input[type="password"],
 .st-pd-settings select,
 .st-pd-settings textarea {
-    background-color: black;
-    color: white;
+    background-color: var(--SmartThemeBlurTintColor, var(--black50));
+    color: var(--SmartThemeBodyColor, inherit);
 }
 
 /* Prompt Manager */
@@ -296,8 +296,8 @@
     resize: vertical;
     box-sizing: border-box;
     font-size: 12px;
-    background-color: black;
-    color: white;
+    background-color: var(--SmartThemeBlurTintColor, var(--black50));
+    color: var(--SmartThemeBodyColor, inherit);
     font-family: monospace;
 }
 

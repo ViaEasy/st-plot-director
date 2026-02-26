@@ -3,14 +3,30 @@
  * Supports OpenAI-compatible and Claude APIs, via proxy or direct.
  */
 
+const DEFAULT_TIMEOUT_MS = 60_000;
+
+/**
+ * Combine an optional AbortController signal with a timeout signal.
+ * @param {AbortSignal} [signal] - External abort signal
+ * @param {number} [timeoutMs] - Timeout in milliseconds
+ * @returns {AbortSignal} Combined signal
+ */
+function combinedSignal(signal, timeoutMs = DEFAULT_TIMEOUT_MS) {
+    const signals = [AbortSignal.timeout(timeoutMs)];
+    if (signal) signals.push(signal);
+    return AbortSignal.any(signals);
+}
+
 /**
  * Generate via SillyTavern's proxy endpoint.
  * @param {Array} messages - Chat messages array
  * @param {object} settings - Plugin settings
  * @param {Function} getRequestHeaders - Header getter from ST context
+ * @param {object} [options] - Optional parameters
+ * @param {AbortSignal} [options.signal] - Abort signal
  * @returns {Promise<string>} Generated text
  */
-export async function generateViaProxy(messages, settings, getRequestHeaders) {
+export async function generateViaProxy(messages, settings, getRequestHeaders, options = {}) {
     const body = {
         chat_completion_source: settings.apiType,
         messages: messages,
@@ -29,6 +45,7 @@ export async function generateViaProxy(messages, settings, getRequestHeaders) {
         method: 'POST',
         headers: getRequestHeaders(),
         body: JSON.stringify(body),
+        signal: combinedSignal(options.signal),
     });
 
     if (!response.ok) {
@@ -56,19 +73,21 @@ export async function generateViaProxy(messages, settings, getRequestHeaders) {
  * Generate via direct API request.
  * @param {Array} messages - Chat messages array
  * @param {object} settings - Plugin settings
+ * @param {object} [options] - Optional parameters
+ * @param {AbortSignal} [options.signal] - Abort signal
  * @returns {Promise<string>} Generated text
  */
-export async function generateDirect(messages, settings) {
+export async function generateDirect(messages, settings, options = {}) {
     if (settings.apiType === 'openai') {
-        return generateDirectOpenAI(messages, settings);
+        return generateDirectOpenAI(messages, settings, options);
     }
     if (settings.apiType === 'claude') {
-        return generateDirectClaude(messages, settings);
+        return generateDirectClaude(messages, settings, options);
     }
     throw new Error(`Unsupported API type: ${settings.apiType}`);
 }
 
-async function generateDirectOpenAI(messages, settings) {
+async function generateDirectOpenAI(messages, settings, options = {}) {
     const url = settings.apiUrl.replace(/\/+$/, '');
     const response = await fetch(`${url}/chat/completions`, {
         method: 'POST',
@@ -82,6 +101,7 @@ async function generateDirectOpenAI(messages, settings) {
             temperature: settings.temperature,
             max_tokens: settings.maxTokens,
         }),
+        signal: combinedSignal(options.signal),
     });
 
     if (!response.ok) {
@@ -90,24 +110,37 @@ async function generateDirectOpenAI(messages, settings) {
     }
 
     const data = await response.json();
+    if (!data.choices?.[0]?.message?.content) {
+        throw new Error('OpenAI response missing choices[0].message.content');
+    }
     return data.choices[0].message.content;
 }
 
-async function generateDirectClaude(messages, settings) {
+async function generateDirectClaude(messages, settings, options = {}) {
     const systemParts = messages.filter(m => m.role === 'system').map(m => m.content);
     const systemText = systemParts.join('\n\n');
     const chatMsgs = messages.filter(m => m.role !== 'system');
     const url = settings.apiUrl.replace(/\/+$/, '');
 
+    // Merge consecutive same-role messages (Claude API rejects them)
+    const mergedMsgs = [];
+    for (const msg of chatMsgs) {
+        if (mergedMsgs.length > 0 && mergedMsgs[mergedMsgs.length - 1].role === msg.role) {
+            mergedMsgs[mergedMsgs.length - 1].content += '\n\n' + msg.content;
+        } else {
+            mergedMsgs.push({ ...msg });
+        }
+    }
+
     // Claude requires first message to be user role
-    if (chatMsgs.length > 0 && chatMsgs[0].role === 'assistant') {
-        chatMsgs.unshift({ role: 'user', content: '[Conversation start]' });
+    if (mergedMsgs.length > 0 && mergedMsgs[0].role === 'assistant') {
+        mergedMsgs.unshift({ role: 'user', content: '[Conversation start]' });
     }
 
     const body = {
         model: settings.model,
         max_tokens: settings.maxTokens,
-        messages: chatMsgs,
+        messages: mergedMsgs,
         temperature: settings.temperature,
     };
 
@@ -123,6 +156,7 @@ async function generateDirectClaude(messages, settings) {
             'anthropic-version': '2023-06-01',
         },
         body: JSON.stringify(body),
+        signal: combinedSignal(options.signal),
     });
 
     if (!response.ok) {
@@ -131,6 +165,9 @@ async function generateDirectClaude(messages, settings) {
     }
 
     const data = await response.json();
+    if (!data.content?.[0]?.text) {
+        throw new Error('Claude response missing content[0].text');
+    }
     return data.content[0].text;
 }
 
