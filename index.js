@@ -61,6 +61,14 @@ function showLLMOutput(text) {
     if (el) el.value = text;
 }
 
+function showInputLog(messages) {
+    const el = document.getElementById('st_pd_input_log');
+    if (!el) return;
+    const text = messages.map(m => `[${m.role}]\n${m.content}`).join('\n\n---\n\n');
+    el.value = text;
+    el.scrollTop = 0;
+}
+
 // ---- Settings ----
 
 function delay(ms) {
@@ -287,6 +295,8 @@ function buildMessages(settings) {
 async function callDirectorLLM(settings) {
     const context = SillyTavern.getContext();
     const messages = buildMessages(settings);
+
+    showInputLog(messages);
 
     if (settings.connectionMode === 'proxy') {
         return await generateViaProxy(messages, settings, context.getRequestHeaders);
