@@ -34,6 +34,8 @@ const defaultSettings = Object.freeze({
     chatu8Timeout: 300,
     presets: {},
     selectedPreset: '',
+    apiConfigs: {},
+    selectedApiConfig: '',
 });
 
 let isProcessing = false;
@@ -186,6 +188,60 @@ function loadPresetToEditor(settings) {
     } else if (textarea) {
         textarea.value = '';
     }
+}
+
+// ---- API Config Helpers ----
+
+const API_CONFIG_FIELDS = ['connectionMode', 'apiType', 'apiUrl', 'apiKey', 'model', 'temperature', 'maxTokens', 'contextLength'];
+
+function populateApiConfigDropdown(settings) {
+    const select = document.getElementById('st_pd_api_config_select');
+    if (!select) return;
+    const names = Object.keys(settings.apiConfigs || {});
+    select.innerHTML = '';
+    const emptyOpt = document.createElement('option');
+    emptyOpt.value = '';
+    emptyOpt.textContent = '-- No saved config --';
+    select.appendChild(emptyOpt);
+    for (const name of names) {
+        const opt = document.createElement('option');
+        opt.value = name;
+        opt.textContent = name;
+        if (name === settings.selectedApiConfig) opt.selected = true;
+        select.appendChild(opt);
+    }
+}
+
+function loadApiConfigToUI(settings) {
+    const config = settings.apiConfigs[settings.selectedApiConfig];
+    if (!config) return;
+    for (const key of API_CONFIG_FIELDS) {
+        if (config[key] !== undefined) {
+            settings[key] = config[key];
+        }
+    }
+    const fieldMap = {
+        connectionMode: 'st_pd_connection_mode',
+        apiType: 'st_pd_api_type',
+        apiUrl: 'st_pd_api_url',
+        apiKey: 'st_pd_api_key',
+        model: 'st_pd_model',
+        temperature: 'st_pd_temperature',
+        maxTokens: 'st_pd_max_tokens',
+        contextLength: 'st_pd_context_length',
+    };
+    for (const [key, id] of Object.entries(fieldMap)) {
+        const el = document.getElementById(id);
+        if (el) el.value = settings[key];
+    }
+}
+
+function extractApiConfig(settings) {
+    const config = {};
+    for (const key of API_CONFIG_FIELDS) {
+        config[key] = settings[key];
+    }
+    return config;
 }
 
 // ---- Core Logic ----
@@ -545,6 +601,47 @@ function bindSettingsUI(settings) {
             saveSettings();
         });
     }
+
+    // API Config management
+    populateApiConfigDropdown(settings);
+
+    document.getElementById('st_pd_api_config_select')?.addEventListener('change', (e) => {
+        settings.selectedApiConfig = e.target.value;
+        if (settings.selectedApiConfig) {
+            loadApiConfigToUI(settings);
+        }
+        saveSettings();
+    });
+
+    document.getElementById('st_pd_api_config_save')?.addEventListener('click', () => {
+        const name = prompt('Enter a name for this API configuration:');
+        if (!name || !name.trim()) return;
+        const trimmed = name.trim();
+        if (!settings.apiConfigs) settings.apiConfigs = {};
+        settings.apiConfigs[trimmed] = extractApiConfig(settings);
+        settings.selectedApiConfig = trimmed;
+        populateApiConfigDropdown(settings);
+        saveSettings();
+        toastr.success(`API config "${trimmed}" saved.`);
+    });
+
+    document.getElementById('st_pd_api_config_delete')?.addEventListener('click', () => {
+        const name = settings.selectedApiConfig;
+        if (!name) {
+            toastr.warning('No API config selected.');
+            return;
+        }
+        if (!confirm(`Delete API config "${name}"?`)) return;
+        delete settings.apiConfigs[name];
+        const remaining = Object.keys(settings.apiConfigs);
+        settings.selectedApiConfig = remaining.length > 0 ? remaining[0] : '';
+        populateApiConfigDropdown(settings);
+        if (settings.selectedApiConfig) {
+            loadApiConfigToUI(settings);
+        }
+        saveSettings();
+        toastr.success(`API config "${name}" deleted.`);
+    });
 
     document.getElementById('st_pd_test_connection')?.addEventListener('click', async () => {
         const context = SillyTavern.getContext();
