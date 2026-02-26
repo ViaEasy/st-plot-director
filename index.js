@@ -30,6 +30,7 @@ const defaultSettings = Object.freeze({
     contextLength: 20,
     outlineEnabled: false,
     outline: '',
+    outlineInjectRounds: 1,
     waitForChatu8: true,
     chatu8Timeout: 300,
     presets: {},
@@ -463,6 +464,17 @@ async function runDirectorRound() {
         let finalText = direction.trim();
         log(`Director LLM responded (${finalText.length} chars).`);
         showLLMOutput(finalText);
+
+        // Inject outline into direction if configured
+        const shouldInjectOutline = settings.outlineEnabled
+            && settings.outline?.trim()
+            && settings.outlineInjectRounds > 0
+            && settings.currentRound <= settings.outlineInjectRounds;
+
+        if (shouldInjectOutline) {
+            finalText = `[Plot Outline]\n${settings.outline.trim()}\n\n[Direction]\n${finalText}`;
+            log(`Outline injected (round ${settings.currentRound} <= ${settings.outlineInjectRounds}).`);
+        }
 
         if (settings.mode === 'preview') {
             log('Preview mode: waiting for user confirmation...');
@@ -985,6 +997,15 @@ function bindSettingsUI(settings) {
         outlineEl.value = settings.outline;
         outlineEl.addEventListener('input', () => {
             settings.outline = outlineEl.value;
+            saveSettings();
+        });
+    }
+
+    const outlineInjectEl = document.getElementById('st_pd_outline_inject_rounds');
+    if (outlineInjectEl) {
+        outlineInjectEl.value = settings.outlineInjectRounds;
+        outlineInjectEl.addEventListener('change', () => {
+            settings.outlineInjectRounds = parseInt(outlineInjectEl.value) || 0;
             saveSettings();
         });
     }
