@@ -176,3 +176,156 @@
     background-color: black;
     color: white;
 }
+
+/* Prompt Manager */
+
+.st-pd-pm-toolbar {
+    margin-bottom: 8px;
+}
+
+.st-pd-pm-block-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-height: 40px;
+}
+
+.st-pd-pm-block {
+    border: 1px solid var(--SmartThemeBorderColor);
+    border-radius: 4px;
+    background: var(--SmartThemeBlurTintColor, rgba(0, 0, 0, 0.3));
+    transition: opacity 0.15s;
+}
+
+.st-pd-pm-block.dragging {
+    opacity: 0.4;
+}
+
+.st-pd-pm-block.drag-over-top {
+    border-top: 2px solid #2196f3;
+}
+
+.st-pd-pm-block.drag-over-bottom {
+    border-bottom: 2px solid #2196f3;
+}
+
+.st-pd-pm-block-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 8px;
+    user-select: none;
+}
+
+.st-pd-pm-drag-handle {
+    cursor: grab;
+    opacity: 0.5;
+    font-size: 0.9em;
+}
+
+.st-pd-pm-drag-handle:hover {
+    opacity: 1;
+}
+
+.st-pd-pm-block-role {
+    font-size: 0.7em;
+    padding: 1px 5px;
+    border-radius: 3px;
+    background: rgba(100, 100, 100, 0.4);
+    font-family: monospace;
+    min-width: 45px;
+    text-align: center;
+}
+
+.st-pd-pm-block-role.role-system {
+    background: rgba(156, 39, 176, 0.25);
+    color: #ce93d8;
+}
+
+.st-pd-pm-block-role.role-user {
+    background: rgba(33, 150, 243, 0.25);
+    color: #90caf9;
+}
+
+.st-pd-pm-block-role.role-assistant {
+    background: rgba(76, 175, 80, 0.25);
+    color: #a5d6a7;
+}
+
+.st-pd-pm-block-role.role-special {
+    background: rgba(255, 152, 0, 0.25);
+    color: #ffcc80;
+}
+
+.st-pd-pm-block-label {
+    flex: 1;
+    font-size: 0.9em;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.st-pd-pm-block-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.st-pd-pm-block-actions i {
+    cursor: pointer;
+    opacity: 0.6;
+    font-size: 0.85em;
+}
+
+.st-pd-pm-block-actions i:hover {
+    opacity: 1;
+}
+
+.st-pd-pm-block-toggle {
+    margin: 0;
+}
+
+.st-pd-pm-block-body {
+    padding: 6px 8px 8px;
+    border-top: 1px solid var(--SmartThemeBorderColor);
+}
+
+.st-pd-pm-block-body textarea {
+    width: 100%;
+    min-height: 60px;
+    resize: vertical;
+    box-sizing: border-box;
+    font-size: 12px;
+    background-color: black;
+    color: white;
+    font-family: monospace;
+}
+
+.st-pd-pm-block-body .st-pd-pm-block-role-select {
+    margin-top: 4px;
+    font-size: 0.85em;
+}
+
+.st-pd-pm-block-preview {
+    font-size: 0.75em;
+    opacity: 0.5;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 200px;
+    margin-left: 4px;
+}
+
+.st-pd-pm-block.disabled {
+    opacity: 0.45;
+}
+
+.st-pd-pm-block.disabled .st-pd-pm-block-header {
+    text-decoration: line-through;
+    text-decoration-color: rgba(255, 255, 255, 0.3);
+}
+
+.st-pd-pm-block-fixed-icon {
+    opacity: 0.3;
+    font-size: 0.7em;
+}

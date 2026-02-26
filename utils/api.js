@@ -94,9 +94,26 @@ async function generateDirectOpenAI(messages, settings) {
 }
 
 async function generateDirectClaude(messages, settings) {
-    const systemMsg = messages.find(m => m.role === 'system');
+    const systemParts = messages.filter(m => m.role === 'system').map(m => m.content);
+    const systemText = systemParts.join('\n\n');
     const chatMsgs = messages.filter(m => m.role !== 'system');
     const url = settings.apiUrl.replace(/\/+$/, '');
+
+    // Claude requires first message to be user role
+    if (chatMsgs.length > 0 && chatMsgs[0].role === 'assistant') {
+        chatMsgs.unshift({ role: 'user', content: '[Conversation start]' });
+    }
+
+    const body = {
+        model: settings.model,
+        max_tokens: settings.maxTokens,
+        messages: chatMsgs,
+        temperature: settings.temperature,
+    };
+
+    if (systemText) {
+        body.system = systemText;
+    }
 
     const response = await fetch(`${url}/messages`, {
         method: 'POST',
@@ -105,13 +122,7 @@ async function generateDirectClaude(messages, settings) {
             'x-api-key': settings.apiKey,
             'anthropic-version': '2023-06-01',
         },
-        body: JSON.stringify({
-            model: settings.model,
-            max_tokens: settings.maxTokens,
-            system: systemMsg?.content || '',
-            messages: chatMsgs,
-            temperature: settings.temperature,
-        }),
+        body: JSON.stringify(body),
     });
 
     if (!response.ok) {

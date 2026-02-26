@@ -45,6 +45,31 @@ export async function initPresets(settings, extensionUrl) {
 }
 
 /**
+ * Default prompt manager config for migration of old presets.
+ * Uses "text" mode to preserve existing behavior.
+ */
+const DEFAULT_PM_BLOCKS = [
+    { id: 'system_prompt', type: 'fixed', role: 'system', label: 'System Prompt', enabled: true, content: null },
+    { id: 'plot_outline', type: 'fixed', role: 'system', label: 'Plot Outline', enabled: true, content: null },
+    { id: 'chat_history', type: 'fixed', role: 'special', label: 'Chat History', enabled: true, content: null },
+    { id: 'instruction', type: 'fixed', role: 'user', label: 'Instruction', enabled: true, content: 'Based on the conversation above, generate the next plot direction.' },
+];
+
+/**
+ * Ensure a preset has a valid prompt_manager config.
+ * Creates default config if missing (lazy migration).
+ * @param {object} preset - Preset to check
+ */
+export function ensurePromptManagerConfig(preset) {
+    if (!preset) return;
+    if (preset.prompt_manager) return;
+    preset.prompt_manager = {
+        chatHistoryMode: 'text',
+        blocks: structuredClone(DEFAULT_PM_BLOCKS),
+    };
+}
+
+/**
  * Get the currently selected preset.
  * @param {object} settings - Extension settings
  * @returns {object|null} Current preset or null
@@ -53,7 +78,9 @@ export function getCurrentPreset(settings) {
     if (!settings.selectedPreset || !settings.presets[settings.selectedPreset]) {
         return null;
     }
-    return settings.presets[settings.selectedPreset];
+    const preset = settings.presets[settings.selectedPreset];
+    ensurePromptManagerConfig(preset);
+    return preset;
 }
 
 /**
@@ -129,41 +156,46 @@ export function importPreset() {
  * @returns {object} Normalized preset
  */
 function convertToPreset(data) {
+    let preset;
+
     // Already in plugin format
     if (data.system_prompt !== undefined) {
-        return {
+        preset = {
             name: data.name || 'Imported Preset',
             system_prompt: data.system_prompt,
             temperature: data.temperature ?? 0.8,
             max_tokens: data.max_tokens ?? 300,
             model: data.model || '',
         };
-    }
-
-    // SillyTavern preset format: extract main prompt from prompts array
-    if (Array.isArray(data.prompts)) {
+        // Preserve prompt_manager if present in imported data
+        if (data.prompt_manager) {
+            preset.prompt_manager = data.prompt_manager;
+        }
+    } else if (Array.isArray(data.prompts)) {
+        // SillyTavern preset format: extract main prompt from prompts array
         const mainPrompt = data.prompts.find(p => p.identifier === 'main');
-        return {
+        preset = {
             name: data.name || 'Imported ST Preset',
             system_prompt: mainPrompt?.content || '',
             temperature: data.temperature ?? 0.8,
             max_tokens: data.max_tokens ?? 300,
             model: '',
         };
-    }
-
-    // Fallback: treat any string content as system prompt
-    if (typeof data.content === 'string') {
-        return {
+    } else if (typeof data.content === 'string') {
+        // Fallback: treat any string content as system prompt
+        preset = {
             name: data.name || 'Imported Preset',
             system_prompt: data.content,
             temperature: 0.8,
             max_tokens: 300,
             model: '',
         };
+    } else {
+        throw new Error('Unrecognized preset format');
     }
 
-    throw new Error('Unrecognized preset format');
+    ensurePromptManagerConfig(preset);
+    return preset;
 }
 
 /**

@@ -136,6 +136,33 @@
         </div>
     </div>
 
+    <!-- Prompt Manager -->
+    <div class="st-pd-section">
+        <div class="st-pd-section-title">
+            <i class="fa-solid fa-bars-staggered"></i>
+            <span data-i18n="Prompt Manager">Prompt Manager</span>
+        </div>
+
+        <div class="st-pd-pm-toolbar">
+            <div class="st-pd-row">
+                <label data-i18n="Chat History Format">Chat History Format</label>
+                <select id="st_pd_chat_history_mode">
+                    <option value="role" data-i18n="Role Mode (preserve roles)">Role Mode (preserve roles)</option>
+                    <option value="text" data-i18n="Text Mode (single message)">Text Mode (single message)</option>
+                </select>
+            </div>
+            <div class="st-pd-btn-row">
+                <div class="menu_button" id="st_pd_pm_add_block">
+                    <i class="fa-solid fa-plus"></i> <span data-i18n="Add Block">Add Block</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="st-pd-pm-block-list" id="st_pd_pm_block_list">
+            <!-- Blocks rendered dynamically by JS -->
+        </div>
+    </div>
+
     <!-- Plot Outline -->
     <div class="st-pd-section">
         <div class="st-pd-section-title">

@@ -254,40 +254,96 @@ function extractApiConfig(settings) {
 
 // ---- Core Logic ----
 
+function getDefaultPromptManagerConfig() {
+    return {
+        chatHistoryMode: 'role',
+        blocks: [
+            { id: 'system_prompt', type: 'fixed', role: 'system', label: 'System Prompt', enabled: true, content: null },
+            { id: 'plot_outline', type: 'fixed', role: 'system', label: 'Plot Outline', enabled: true, content: null },
+            { id: 'chat_history', type: 'fixed', role: 'special', label: 'Chat History', enabled: true, content: null },
+            { id: 'instruction', type: 'fixed', role: 'user', label: 'Instruction', enabled: true, content: 'Based on the conversation above, generate the next plot direction.' },
+        ],
+    };
+}
+
+function buildChatHistory(chat, settings, mode) {
+    const recentChat = chat.slice(-settings.contextLength);
+    const filtered = recentChat.filter(msg => !(msg.is_system && !msg.is_user));
+
+    if (mode === 'text') {
+        let chatText = '';
+        for (const msg of filtered) {
+            const name = msg.name || (msg.is_user ? 'User' : 'Character');
+            chatText += `${name}: ${msg.mes}\n\n`;
+        }
+        return chatText.trim() ? [{ role: 'user', content: chatText.trim() }] : [];
+    }
+
+    // Role mode: preserve user/assistant roles, merge adjacent same-role
+    const rawMessages = filtered.map(msg => ({
+        role: msg.is_user ? 'user' : 'assistant',
+        content: msg.mes,
+    }));
+
+    const merged = [];
+    for (const msg of rawMessages) {
+        if (merged.length > 0 && merged[merged.length - 1].role === msg.role) {
+            merged[merged.length - 1].content += '\n\n' + msg.content;
+        } else {
+            merged.push({ ...msg });
+        }
+    }
+
+    return merged;
+}
+
 function buildMessages(settings) {
     const context = SillyTavern.getContext();
     const chat = context.chat || [];
     const preset = getCurrentPreset(settings);
+    const pmConfig = preset?.prompt_manager || getDefaultPromptManagerConfig();
 
     const messages = [];
 
-    if (preset && preset.system_prompt) {
-        messages.push({ role: 'system', content: preset.system_prompt });
-    }
+    for (const block of pmConfig.blocks) {
+        if (!block.enabled) continue;
 
-    if (settings.outlineEnabled && settings.outline.trim()) {
-        messages.push({
-            role: 'system',
-            content: `[Plot Outline]\n${settings.outline.trim()}`,
-        });
-    }
+        switch (block.id) {
+            case 'system_prompt':
+                if (preset?.system_prompt) {
+                    messages.push({ role: 'system', content: preset.system_prompt });
+                }
+                break;
 
-    const recentChat = chat.slice(-settings.contextLength);
-    let chatText = '';
-    for (const msg of recentChat) {
-        if (msg.is_system && !msg.is_user) continue;
-        const name = msg.name || (msg.is_user ? 'User' : 'Character');
-        chatText += `${name}: ${msg.mes}\n\n`;
-    }
+            case 'plot_outline':
+                if (settings.outlineEnabled && settings.outline?.trim()) {
+                    messages.push({
+                        role: 'system',
+                        content: `[Plot Outline]\n${settings.outline.trim()}`,
+                    });
+                }
+                break;
 
-    if (chatText) {
-        messages.push({ role: 'user', content: chatText.trim() });
-    }
+            case 'chat_history': {
+                const historyMessages = buildChatHistory(chat, settings, pmConfig.chatHistoryMode);
+                messages.push(...historyMessages);
+                break;
+            }
 
-    messages.push({
-        role: 'user',
-        content: 'Based on the conversation above, generate the next plot direction.',
-    });
+            case 'instruction':
+                if (block.content?.trim()) {
+                    messages.push({ role: block.role || 'user', content: block.content.trim() });
+                }
+                break;
+
+            default:
+                // Custom blocks
+                if (block.type === 'custom' && block.content?.trim()) {
+                    messages.push({ role: block.role || 'user', content: block.content.trim() });
+                }
+                break;
+        }
+    }
 
     return messages;
 }
@@ -482,6 +538,257 @@ function stopDirector(settings) {
     }
 }
 
+// ---- Prompt Manager UI ----
+
+function getBlockContentPreview(block, settings) {
+    const preset = getCurrentPreset(settings);
+    switch (block.id) {
+        case 'system_prompt':
+            return preset?.system_prompt || '(empty)';
+        case 'plot_outline':
+            return settings.outline?.trim() || '(empty)';
+        case 'chat_history':
+            return '(recent chat messages)';
+        case 'instruction':
+            return block.content || '(empty)';
+        default:
+            return block.content || '(empty)';
+    }
+}
+
+function isBlockContentEditable(block) {
+    return block.id === 'instruction' || block.type === 'custom';
+}
+
+function renderPromptManager(settings) {
+    const container = document.getElementById('st_pd_pm_block_list');
+    if (!container) return;
+
+    const preset = getCurrentPreset(settings);
+    if (!preset) {
+        container.innerHTML = '<div style="opacity:0.5;padding:8px;">No preset selected.</div>';
+        return;
+    }
+
+    const pmConfig = preset.prompt_manager;
+    container.innerHTML = '';
+
+    // Update chatHistoryMode dropdown
+    const modeSelect = document.getElementById('st_pd_chat_history_mode');
+    if (modeSelect) {
+        modeSelect.value = pmConfig.chatHistoryMode || 'role';
+    }
+
+    for (let i = 0; i < pmConfig.blocks.length; i++) {
+        const block = pmConfig.blocks[i];
+        const blockEl = document.createElement('div');
+        blockEl.className = 'st-pd-pm-block' + (block.enabled ? '' : ' disabled');
+        blockEl.draggable = true;
+        blockEl.dataset.blockIndex = i;
+
+        const roleClass = 'role-' + (block.role || 'user');
+        const preview = getBlockContentPreview(block, settings);
+        const previewText = preview.length > 50 ? preview.substring(0, 50) + '...' : preview;
+
+        let actionsHtml = '';
+        if (block.type === 'fixed') {
+            actionsHtml += '<i class="fa-solid fa-lock st-pd-pm-block-fixed-icon" title="Fixed block"></i>';
+        }
+        actionsHtml += `<input type="checkbox" class="st-pd-pm-block-toggle" ${block.enabled ? 'checked' : ''} title="Enable/Disable" />`;
+        actionsHtml += '<i class="fa-solid fa-chevron-down st-pd-pm-block-expand" title="Expand/Collapse"></i>';
+        if (block.type === 'custom') {
+            actionsHtml += '<i class="fa-solid fa-trash st-pd-pm-block-delete" title="Delete block"></i>';
+        }
+
+        blockEl.innerHTML = `
+            <div class="st-pd-pm-block-header">
+                <i class="fa-solid fa-grip-vertical st-pd-pm-drag-handle"></i>
+                <span class="st-pd-pm-block-role ${roleClass}">${block.role || 'user'}</span>
+                <span class="st-pd-pm-block-label">${escapeHtml(block.label)}</span>
+                <span class="st-pd-pm-block-preview">${escapeHtml(previewText)}</span>
+                <div class="st-pd-pm-block-actions">${actionsHtml}</div>
+            </div>
+            <div class="st-pd-pm-block-body st-pd-hidden"></div>
+        `;
+
+        // Build body content
+        const body = blockEl.querySelector('.st-pd-pm-block-body');
+        if (isBlockContentEditable(block)) {
+            const textarea = document.createElement('textarea');
+            textarea.className = 'text_pole';
+            textarea.value = block.content || '';
+            textarea.addEventListener('input', () => {
+                block.content = textarea.value;
+                saveSettings();
+                // Update preview
+                const previewEl = blockEl.querySelector('.st-pd-pm-block-preview');
+                if (previewEl) {
+                    const t = textarea.value || '(empty)';
+                    previewEl.textContent = t.length > 50 ? t.substring(0, 50) + '...' : t;
+                }
+            });
+            body.appendChild(textarea);
+        } else {
+            const previewDiv = document.createElement('div');
+            previewDiv.style.cssText = 'font-size:0.85em;opacity:0.7;white-space:pre-wrap;max-height:120px;overflow-y:auto;';
+            previewDiv.textContent = getBlockContentPreview(block, settings);
+            body.appendChild(previewDiv);
+        }
+
+        if (block.type === 'custom') {
+            const roleSelect = document.createElement('select');
+            roleSelect.className = 'st-pd-pm-block-role-select';
+            for (const r of ['system', 'user', 'assistant']) {
+                const opt = document.createElement('option');
+                opt.value = r;
+                opt.textContent = r;
+                if (r === block.role) opt.selected = true;
+                roleSelect.appendChild(opt);
+            }
+            roleSelect.addEventListener('change', () => {
+                block.role = roleSelect.value;
+                saveSettings();
+                renderPromptManager(settings);
+            });
+            body.appendChild(roleSelect);
+        }
+
+        // Toggle enable/disable
+        blockEl.querySelector('.st-pd-pm-block-toggle')?.addEventListener('change', (e) => {
+            block.enabled = e.target.checked;
+            blockEl.classList.toggle('disabled', !block.enabled);
+            saveSettings();
+            // Sync outline enabled state
+            if (block.id === 'plot_outline') {
+                settings.outlineEnabled = block.enabled;
+                const outlineCheckbox = document.getElementById('st_pd_outline_enabled');
+                if (outlineCheckbox) outlineCheckbox.checked = block.enabled;
+            }
+        });
+
+        // Expand/collapse
+        blockEl.querySelector('.st-pd-pm-block-expand')?.addEventListener('click', (e) => {
+            body.classList.toggle('st-pd-hidden');
+            e.target.classList.toggle('fa-chevron-down');
+            e.target.classList.toggle('fa-chevron-up');
+        });
+
+        // Delete custom block
+        blockEl.querySelector('.st-pd-pm-block-delete')?.addEventListener('click', () => {
+            pmConfig.blocks.splice(i, 1);
+            saveSettings();
+            renderPromptManager(settings);
+        });
+
+        // Drag-and-drop events
+        blockEl.addEventListener('dragstart', (e) => {
+            e.dataTransfer.effectAllowed = 'move';
+            e.dataTransfer.setData('text/plain', String(i));
+            blockEl.classList.add('dragging');
+        });
+
+        blockEl.addEventListener('dragend', () => {
+            blockEl.classList.remove('dragging');
+            container.querySelectorAll('.st-pd-pm-block').forEach(el => {
+                el.classList.remove('drag-over-top', 'drag-over-bottom');
+            });
+        });
+
+        blockEl.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'move';
+            const rect = blockEl.getBoundingClientRect();
+            const midY = rect.top + rect.height / 2;
+            blockEl.classList.remove('drag-over-top', 'drag-over-bottom');
+            if (e.clientY < midY) {
+                blockEl.classList.add('drag-over-top');
+            } else {
+                blockEl.classList.add('drag-over-bottom');
+            }
+        });
+
+        blockEl.addEventListener('dragleave', () => {
+            blockEl.classList.remove('drag-over-top', 'drag-over-bottom');
+        });
+
+        blockEl.addEventListener('drop', (e) => {
+            e.preventDefault();
+            blockEl.classList.remove('drag-over-top', 'drag-over-bottom');
+            const fromIndex = parseInt(e.dataTransfer.getData('text/plain'));
+            if (isNaN(fromIndex) || fromIndex === i) return;
+
+            const rect = blockEl.getBoundingClientRect();
+            const midY = rect.top + rect.height / 2;
+            let toIndex = e.clientY < midY ? i : i + 1;
+
+            // Adjust index if dragging from before the drop target
+            if (fromIndex < toIndex) toIndex--;
+
+            const [moved] = pmConfig.blocks.splice(fromIndex, 1);
+            pmConfig.blocks.splice(toIndex, 0, moved);
+            saveSettings();
+            renderPromptManager(settings);
+        });
+
+        container.appendChild(blockEl);
+    }
+}
+
+function bindPromptManagerUI(settings) {
+    // Chat history mode
+    const modeSelect = document.getElementById('st_pd_chat_history_mode');
+    modeSelect?.addEventListener('change', () => {
+        const preset = getCurrentPreset(settings);
+        if (preset?.prompt_manager) {
+            preset.prompt_manager.chatHistoryMode = modeSelect.value;
+            saveSettings();
+        }
+    });
+
+    // Add custom block
+    document.getElementById('st_pd_pm_add_block')?.addEventListener('click', async () => {
+        const context = SillyTavern.getContext();
+        const result = await context.callGenericPopup('Enter block label:', context.POPUP_TYPE.INPUT);
+        if (!result || typeof result !== 'string' || !result.trim()) return;
+
+        const preset = getCurrentPreset(settings);
+        if (!preset?.prompt_manager) return;
+
+        const newBlock = {
+            id: `custom_${Date.now()}`,
+            type: 'custom',
+            role: 'user',
+            label: result.trim(),
+            enabled: true,
+            content: '',
+        };
+
+        preset.prompt_manager.blocks.push(newBlock);
+        saveSettings();
+        renderPromptManager(settings);
+        toastr.success(`Block "${result.trim()}" added.`);
+    });
+
+    // Sync outline checkbox -> prompt manager block
+    const outlineCheckbox = document.getElementById('st_pd_outline_enabled');
+    if (outlineCheckbox) {
+        outlineCheckbox.addEventListener('change', () => {
+            settings.outlineEnabled = outlineCheckbox.checked;
+            const preset = getCurrentPreset(settings);
+            if (preset?.prompt_manager) {
+                const outlineBlock = preset.prompt_manager.blocks.find(b => b.id === 'plot_outline');
+                if (outlineBlock) {
+                    outlineBlock.enabled = outlineCheckbox.checked;
+                }
+            }
+            saveSettings();
+            renderPromptManager(settings);
+        });
+    }
+
+    renderPromptManager(settings);
+}
+
 // ---- Settings Panel Binding ----
 
 function bindSettingsUI(settings) {
@@ -670,10 +977,7 @@ function bindSettingsUI(settings) {
     const outlineEnabledEl = document.getElementById('st_pd_outline_enabled');
     if (outlineEnabledEl) {
         outlineEnabledEl.checked = settings.outlineEnabled;
-        outlineEnabledEl.addEventListener('change', () => {
-            settings.outlineEnabled = outlineEnabledEl.checked;
-            saveSettings();
-        });
+        // Change listener is handled by bindPromptManagerUI for bidirectional sync
     }
 
     const outlineEl = document.getElementById('st_pd_outline');
@@ -710,6 +1014,9 @@ function bindSettingsUI(settings) {
 
     // Preset management
     bindPresetUI(settings);
+
+    // Prompt Manager
+    bindPromptManagerUI(settings);
 }
 
 function bindPresetUI(settings) {
@@ -722,6 +1029,7 @@ function bindPresetUI(settings) {
     selectEl?.addEventListener('change', () => {
         settings.selectedPreset = selectEl.value;
         loadPresetToEditor(settings);
+        renderPromptManager(settings);
         saveSettings();
     });
 
@@ -743,10 +1051,12 @@ function bindPresetUI(settings) {
                 temperature: settings.temperature,
                 max_tokens: settings.maxTokens,
                 model: '',
+                prompt_manager: getDefaultPromptManagerConfig(),
             });
             settings.selectedPreset = name;
             populatePresetDropdown(settings);
             loadPresetToEditor(settings);
+            renderPromptManager(settings);
             saveSettings();
             toastr.success(`Preset "${name}" created.`);
         }
@@ -763,6 +1073,7 @@ function bindPresetUI(settings) {
             deletePreset(settings, settings.selectedPreset);
             populatePresetDropdown(settings);
             loadPresetToEditor(settings);
+            renderPromptManager(settings);
             saveSettings();
             toastr.success('Preset deleted.');
         }
@@ -776,6 +1087,7 @@ function bindPresetUI(settings) {
             settings.selectedPreset = name;
             populatePresetDropdown(settings);
             loadPresetToEditor(settings);
+            renderPromptManager(settings);
             saveSettings();
             toastr.success(`Preset "${name}" imported.`);
         } catch (err) {
@@ -798,6 +1110,7 @@ function bindPresetUI(settings) {
         if (preset && promptEl) {
             preset.system_prompt = promptEl.value;
             saveSettings();
+            renderPromptManager(settings);
             toastr.success(`Preset "${settings.selectedPreset}" saved.`);
         } else {
             toastr.warning('No preset selected.');
