@@ -167,3 +167,12 @@
     0%, 100% { opacity: 1; }
     50% { opacity: 0.5; }
 }
+
+.st-pd-settings input[type="text"],
+.st-pd-settings input[type="number"],
+.st-pd-settings input[type="password"],
+.st-pd-settings select,
+.st-pd-settings textarea {
+    background-color: black;
+    color: white;
+}
