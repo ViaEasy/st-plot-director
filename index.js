@@ -32,6 +32,7 @@ const defaultSettings = Object.freeze({
     outline: '',
     outlineInjectRounds: 1,
     waitForChatu8: true,
+    chatu8StartTimeout: 15,
     chatu8Timeout: 300,
     presets: {},
     selectedPreset: '',
@@ -86,9 +87,9 @@ async function waitForChatu8Complete(settings) {
     const timeoutMs = (settings.chatu8Timeout || 300) * 1000;
     const startTime = Date.now();
 
-    // Phase 1: Poll for up to 15s waiting for chatu8 to START (loading class appears)
+    // Phase 1: Poll for up to chatu8StartTimeout waiting for chatu8 to START (loading class appears)
     log('Waiting for chatu8 to start...');
-    const pollStartLimit = 15000;
+    const pollStartLimit = (settings.chatu8StartTimeout || 15) * 1000;
     let detected = false;
     while (Date.now() - startTime < pollStartLimit) {
         if (fab.classList.contains('st-chatu8-fab-loading')) {
@@ -99,7 +100,7 @@ async function waitForChatu8Complete(settings) {
     }
 
     if (!detected) {
-        log('chatu8 did not start within 15s, continuing.');
+        log(`chatu8 did not start within ${settings.chatu8StartTimeout || 15}s, continuing.`);
         return;
     }
 
@@ -849,6 +850,15 @@ function bindSettingsUI(settings) {
         chatu8TimeoutEl.value = settings.chatu8Timeout;
         chatu8TimeoutEl.addEventListener('change', () => {
             settings.chatu8Timeout = parseInt(chatu8TimeoutEl.value) || 300;
+            saveSettings();
+        });
+    }
+
+    const chatu8StartEl = document.getElementById('st_pd_chatu8_start_timeout');
+    if (chatu8StartEl) {
+        chatu8StartEl.value = settings.chatu8StartTimeout;
+        chatu8StartEl.addEventListener('change', () => {
+            settings.chatu8StartTimeout = parseInt(chatu8StartEl.value) || 15;
             saveSettings();
         });
     }
