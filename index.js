@@ -38,6 +38,7 @@ const defaultSettings = Object.freeze({
     selectedPreset: '',
     apiConfigs: {},
     selectedApiConfig: '',
+    regexRules: [],
 });
 
 let isProcessing = false;
@@ -349,9 +350,37 @@ function buildMessages(settings) {
     return messages;
 }
 
+function applyRegexRules(messages, rules) {
+    if (!rules || rules.length === 0) return messages;
+
+    const activeRules = rules.filter(r => r.enabled && r.pattern);
+    if (activeRules.length === 0) return messages;
+
+    const compiled = [];
+    for (const rule of activeRules) {
+        try {
+            compiled.push({ regex: new RegExp(rule.pattern, rule.flags || 'g'), replacement: rule.replacement || '', label: rule.label || rule.pattern });
+        } catch (e) {
+            log(`WARNING: Invalid regex "${rule.pattern}" (${rule.label || 'unnamed'}): ${e.message}. Skipping.`);
+        }
+    }
+
+    if (compiled.length === 0) return messages;
+
+    return messages.map(m => {
+        let content = m.content;
+        for (const { regex, replacement } of compiled) {
+            content = content.replace(regex, replacement);
+        }
+        return content !== m.content ? { ...m, content } : m;
+    });
+}
+
 async function callDirectorLLM(settings, signal) {
     const context = SillyTavern.getContext();
-    const messages = buildMessages(settings);
+    let messages = buildMessages(settings);
+
+    messages = applyRegexRules(messages, settings.regexRules);
 
     showInputLog(messages);
 
@@ -845,6 +874,200 @@ function bindPromptManagerUI(settings) {
     renderPromptManager(settings);
 }
 
+// ---- Regex Filters UI ----
+
+function renderRegexRules(settings) {
+    const container = document.getElementById('st_pd_regex_rule_list');
+    if (!container) return;
+
+    if (!settings.regexRules) settings.regexRules = [];
+    const rules = settings.regexRules;
+
+    container.innerHTML = '';
+
+    for (let i = 0; i < rules.length; i++) {
+        const rule = rules[i];
+        const ruleEl = document.createElement('div');
+        ruleEl.className = 'st-pd-regex-rule' + (rule.enabled ? '' : ' disabled');
+        ruleEl.draggable = true;
+        ruleEl.dataset.ruleIndex = i;
+
+        const displayLabel = rule.label || (rule.pattern ? `/${rule.pattern}/${rule.flags || ''}` : '(empty rule)');
+
+        ruleEl.innerHTML = `
+            <div class="st-pd-regex-rule-header">
+                <i class="fa-solid fa-grip-vertical st-pd-regex-drag-handle"></i>
+                <span class="st-pd-regex-rule-label">${escapeHtml(displayLabel)}</span>
+                <div class="st-pd-regex-rule-actions">
+                    <input type="checkbox" class="st-pd-regex-rule-toggle" ${rule.enabled ? 'checked' : ''} title="Enable/Disable" />
+                    <i class="fa-solid fa-chevron-down st-pd-regex-rule-expand" title="Expand/Collapse"></i>
+                    <i class="fa-solid fa-trash st-pd-regex-rule-delete" title="Delete rule"></i>
+                </div>
+            </div>
+            <div class="st-pd-regex-rule-body st-pd-hidden">
+                <div class="st-pd-row">
+                    <label>Label</label>
+                    <input type="text" class="st-pd-regex-input-label" value="${escapeHtml(rule.label || '')}" placeholder="Optional name" />
+                </div>
+                <div class="st-pd-row">
+                    <label>Pattern</label>
+                    <input type="text" class="st-pd-regex-input-pattern" value="${escapeHtml(rule.pattern || '')}" placeholder="Regular expression" />
+                </div>
+                <div class="st-pd-row">
+                    <label>Flags</label>
+                    <input type="text" class="st-pd-regex-input-flags" value="${escapeHtml(rule.flags || 'g')}" placeholder="g" style="max-width:80px;" />
+                </div>
+                <div class="st-pd-row">
+                    <label>Replace</label>
+                    <input type="text" class="st-pd-regex-input-replacement" value="${escapeHtml(rule.replacement || '')}" placeholder="(empty = delete)" />
+                </div>
+            </div>
+        `;
+
+        // Toggle enable/disable
+        ruleEl.querySelector('.st-pd-regex-rule-toggle')?.addEventListener('change', (e) => {
+            rule.enabled = e.target.checked;
+            ruleEl.classList.toggle('disabled', !rule.enabled);
+            saveSettings();
+        });
+
+        // Expand/collapse
+        ruleEl.querySelector('.st-pd-regex-rule-expand')?.addEventListener('click', (e) => {
+            const body = ruleEl.querySelector('.st-pd-regex-rule-body');
+            body.classList.toggle('st-pd-hidden');
+            e.target.classList.toggle('fa-chevron-down');
+            e.target.classList.toggle('fa-chevron-up');
+        });
+
+        // Delete
+        ruleEl.querySelector('.st-pd-regex-rule-delete')?.addEventListener('click', () => {
+            rules.splice(i, 1);
+            saveSettings();
+            renderRegexRules(settings);
+        });
+
+        // Input bindings
+        const labelInput = ruleEl.querySelector('.st-pd-regex-input-label');
+        labelInput?.addEventListener('input', () => {
+            rule.label = labelInput.value;
+            const labelEl = ruleEl.querySelector('.st-pd-regex-rule-label');
+            if (labelEl) {
+                labelEl.textContent = rule.label || (rule.pattern ? `/${rule.pattern}/${rule.flags || ''}` : '(empty rule)');
+            }
+            saveSettings();
+        });
+
+        const patternInput = ruleEl.querySelector('.st-pd-regex-input-pattern');
+        patternInput?.addEventListener('input', () => {
+            rule.pattern = patternInput.value;
+            if (!rule.label) {
+                const labelEl = ruleEl.querySelector('.st-pd-regex-rule-label');
+                if (labelEl) {
+                    labelEl.textContent = rule.pattern ? `/${rule.pattern}/${rule.flags || ''}` : '(empty rule)';
+                }
+            }
+            saveSettings();
+        });
+        patternInput?.addEventListener('blur', () => {
+            if (!patternInput.value) {
+                patternInput.classList.remove('st-pd-regex-invalid');
+                return;
+            }
+            try {
+                new RegExp(patternInput.value, rule.flags || 'g');
+                patternInput.classList.remove('st-pd-regex-invalid');
+            } catch {
+                patternInput.classList.add('st-pd-regex-invalid');
+            }
+        });
+
+        const flagsInput = ruleEl.querySelector('.st-pd-regex-input-flags');
+        flagsInput?.addEventListener('input', () => {
+            rule.flags = flagsInput.value;
+            if (!rule.label) {
+                const labelEl = ruleEl.querySelector('.st-pd-regex-rule-label');
+                if (labelEl) {
+                    labelEl.textContent = rule.pattern ? `/${rule.pattern}/${rule.flags || ''}` : '(empty rule)';
+                }
+            }
+            saveSettings();
+        });
+
+        const replacementInput = ruleEl.querySelector('.st-pd-regex-input-replacement');
+        replacementInput?.addEventListener('input', () => {
+            rule.replacement = replacementInput.value;
+            saveSettings();
+        });
+
+        // Drag-and-drop events
+        ruleEl.addEventListener('dragstart', (e) => {
+            e.dataTransfer.effectAllowed = 'move';
+            e.dataTransfer.setData('text/plain', String(i));
+            ruleEl.classList.add('dragging');
+        });
+
+        ruleEl.addEventListener('dragend', () => {
+            ruleEl.classList.remove('dragging');
+            container.querySelectorAll('.st-pd-regex-rule').forEach(el => {
+                el.classList.remove('drag-over-top', 'drag-over-bottom');
+            });
+        });
+
+        ruleEl.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'move';
+            const rect = ruleEl.getBoundingClientRect();
+            const midY = rect.top + rect.height / 2;
+            ruleEl.classList.remove('drag-over-top', 'drag-over-bottom');
+            if (e.clientY < midY) {
+                ruleEl.classList.add('drag-over-top');
+            } else {
+                ruleEl.classList.add('drag-over-bottom');
+            }
+        });
+
+        ruleEl.addEventListener('dragleave', () => {
+            ruleEl.classList.remove('drag-over-top', 'drag-over-bottom');
+        });
+
+        ruleEl.addEventListener('drop', (e) => {
+            e.preventDefault();
+            const fromIdx = parseInt(e.dataTransfer.getData('text/plain'), 10);
+            const rect = ruleEl.getBoundingClientRect();
+            const midY = rect.top + rect.height / 2;
+            let toIdx = e.clientY < midY ? i : i + 1;
+            if (fromIdx < toIdx) toIdx--;
+            if (fromIdx !== toIdx && fromIdx >= 0 && fromIdx < rules.length) {
+                const [moved] = rules.splice(fromIdx, 1);
+                rules.splice(toIdx, 0, moved);
+                saveSettings();
+                renderRegexRules(settings);
+            }
+            ruleEl.classList.remove('drag-over-top', 'drag-over-bottom');
+        });
+
+        container.appendChild(ruleEl);
+    }
+}
+
+function bindRegexUI(settings) {
+    document.getElementById('st_pd_regex_add_rule')?.addEventListener('click', () => {
+        if (!settings.regexRules) settings.regexRules = [];
+        settings.regexRules.push({
+            id: 'regex_' + Date.now(),
+            enabled: true,
+            label: '',
+            pattern: '',
+            flags: 'g',
+            replacement: '',
+        });
+        saveSettings();
+        renderRegexRules(settings);
+    });
+
+    renderRegexRules(settings);
+}
+
 // ---- Settings Panel Binding ----
 
 function bindSettingsUI(settings) {
@@ -1097,6 +1320,9 @@ function bindSettingsUI(settings) {
 
     // Prompt Manager
     bindPromptManagerUI(settings);
+
+    // Regex Filters
+    bindRegexUI(settings);
 }
 
 function bindPresetUI(settings) {
