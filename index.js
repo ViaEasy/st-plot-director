@@ -560,7 +560,7 @@ function shouldInjectOutlineToLLM(settings) {
     const currentRound = settings.currentRound || 0;
     const maxRounds = settings.outlinePromptRounds || 999;
 
-    return currentRound < maxRounds;
+    return currentRound <= maxRounds;
 }
 
 function buildMessages(settings) {
