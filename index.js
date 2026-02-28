@@ -14,6 +14,83 @@ import {
 const MODULE_NAME = 'st-plot-director';
 const EXTENSION_FOLDER = `third-party/${MODULE_NAME}`;
 
+// API 模板数据
+const API_TEMPLATES = {
+    openai: {
+        name: 'OpenAI',
+        connectionMode: 'direct',
+        apiType: 'openai',
+        apiUrl: 'https://api.openai.com/v1',
+        model: 'gpt-4o',
+        temperature: 0.8,
+        maxTokens: 300,
+    },
+    claude: {
+        name: 'Claude (Direct)',
+        connectionMode: 'direct',
+        apiType: 'claude',
+        apiUrl: 'https://api.anthropic.com/v1',
+        model: 'claude-3-5-sonnet-20241022',
+        temperature: 0.8,
+        maxTokens: 300,
+    },
+    ollama: {
+        name: 'Ollama (Local)',
+        connectionMode: 'direct',
+        apiType: 'openai',
+        apiUrl: 'http://localhost:11434/v1',
+        model: 'llama3.2',
+        temperature: 0.8,
+        maxTokens: 300,
+    },
+    proxy: {
+        name: 'SillyTavern Proxy',
+        connectionMode: 'proxy',
+        apiType: 'openai',
+        apiUrl: '',
+        model: '',
+        temperature: 0.8,
+        maxTokens: 300,
+    },
+};
+
+// 错误映射表
+const ERROR_MESSAGES = {
+    NO_MODEL: '请设置模型名称',
+    NO_PRESET: '请选择包含 System Prompt 的预设',
+    API_401: 'API Key 无效或已过期',
+    API_403: 'API 访问被拒绝，请检查权限',
+    API_429: 'API 请求频率超限，请稍后重试',
+    API_500: 'API 服务器错误，请稍后重试',
+    NETWORK_ERROR: '网络连接失败，请检查 API URL',
+    TIMEOUT: '请求超时，请检查网络或增加超时时间',
+};
+
+// Regex 示例
+const REGEX_EXAMPLES = [
+    {
+        label: '去除旁白（*号包裹）',
+        pattern: '\\*[^*]+\\*',
+        replacement: '',
+        flags: 'g',
+        enabled: true,
+    },
+    {
+        label: '去除旁白（括号包裹）',
+        pattern: '\\([^)]+\\)',
+        replacement: '',
+        flags: 'g',
+        enabled: false,
+    },
+    {
+        label: '统一引号为中文',
+        pattern: '[""]',
+        replacement: '"',
+        flags: 'g',
+        enabled: false,
+    },
+];
+
 const defaultSettings = Object.freeze({
     enabled: false,
     mode: 'auto',
@@ -46,29 +123,151 @@ let isProcessing = false;
 let currentAbortController = null;
 let eventsBound = false;
 
+// 配置变化检测
+let savedPresetSnapshot = null;
+let hasUnsavedChanges = false;
+
+// 状态可视化
+let statusUpdateInterval = null;
+
 // ---- Logging ----
 
 const MAX_LOG_ENTRIES = 500;
 const logEntries = [];
+let currentLogFilter = 'all'; // 'all', 'warn', 'error'
 
-function log(message) {
+function log(message, level = 'INFO') {
     const time = new Date().toLocaleTimeString();
-    const entry = `[${time}] ${message}`;
+    const entry = { time, message, level };
     if (logEntries.length >= MAX_LOG_ENTRIES) {
         logEntries.shift();
     }
     logEntries.push(entry);
+    updateLogDisplay();
+    console.log(`[PlotDirector] [${level}] ${message}`);
+}
+
+function updateLogDisplay() {
     const el = document.getElementById('st_pd_log');
-    if (el) {
-        // Append new entry instead of re-joining entire array
-        if (el.value) {
-            el.value += '\n' + entry;
-        } else {
-            el.value = entry;
+    if (!el) return;
+
+    const filtered = logEntries.filter(entry => {
+        if (currentLogFilter === 'all') return true;
+        if (currentLogFilter === 'warn') return entry.level === 'WARN' || entry.level === 'ERROR';
+        if (currentLogFilter === 'error') return entry.level === 'ERROR';
+        return true;
+    });
+
+    const lines = filtered.map(entry => {
+        const prefix = `[${entry.time}] [${entry.level}]`;
+        return `${prefix} ${entry.message}`;
+    });
+
+    el.value = lines.join('\n');
+    el.scrollTop = el.scrollHeight;
+}
+
+// 错误处理函数
+function handleError(error, context = '') {
+    let errorMsg = error.message || String(error);
+    let friendlyMsg = errorMsg;
+
+    // 优先检查 HTTP 状态码
+    const status = error.status || error.response?.status;
+    if (status) {
+        if (status === 401) {
+            friendlyMsg = ERROR_MESSAGES.API_401;
+        } else if (status === 403) {
+            friendlyMsg = ERROR_MESSAGES.API_403;
+        } else if (status === 429) {
+            friendlyMsg = ERROR_MESSAGES.API_429;
+        } else if (status >= 500 && status < 600) {
+            friendlyMsg = ERROR_MESSAGES.API_500;
         }
-        el.scrollTop = el.scrollHeight;
+    } else {
+        // 回退到字符串匹配
+        if (errorMsg.includes('401')) {
+            friendlyMsg = ERROR_MESSAGES.API_401;
+        } else if (errorMsg.includes('403')) {
+            friendlyMsg = ERROR_MESSAGES.API_403;
+        } else if (errorMsg.includes('429')) {
+            friendlyMsg = ERROR_MESSAGES.API_429;
+        } else if (errorMsg.includes('500') || errorMsg.includes('502') || errorMsg.includes('503')) {
+            friendlyMsg = ERROR_MESSAGES.API_500;
+        } else if (errorMsg.includes('timeout') || errorMsg.includes('timed out')) {
+            friendlyMsg = ERROR_MESSAGES.TIMEOUT;
+        } else if (errorMsg.includes('network') || errorMsg.includes('ECONNREFUSED') || errorMsg.includes('fetch failed')) {
+            friendlyMsg = ERROR_MESSAGES.NETWORK_ERROR;
+        }
     }
-    console.log(`[PlotDirector] ${message}`);
+
+    const fullMsg = context ? `${friendlyMsg} (${context})` : friendlyMsg;
+    toastr.error(fullMsg);
+    log(errorMsg, 'ERROR');
+}
+
+// 配置变化检测函数
+function markConfigAsChanged() {
+    hasUnsavedChanges = true;
+    updateUnsavedIndicator();
+}
+
+function markConfigAsSaved() {
+    hasUnsavedChanges = false;
+    savedPresetSnapshot = getCurrentPresetSnapshot();
+    updateUnsavedIndicator();
+}
+
+function updateUnsavedIndicator() {
+    const indicator = document.getElementById('st_pd_unsaved_indicator');
+    if (indicator) {
+        indicator.style.display = hasUnsavedChanges ? 'inline' : 'none';
+    }
+}
+
+function getCurrentPresetSnapshot() {
+    const preset = getCurrentPreset(getSettings());
+    return preset ? JSON.stringify(preset) : null;
+}
+
+function confirmSwitchPreset(newPresetName) {
+    if (hasUnsavedChanges) {
+        return confirm('当前配置未保存，是否继续切换？未保存的更改将丢失。');
+    }
+    return true;
+}
+
+// 状态可视化函数
+function updateWaitingStatus(message, elapsedSeconds, totalSeconds) {
+    const statusEl = document.getElementById('st_pd_status');
+    if (!statusEl) return;
+
+    const remaining = totalSeconds - elapsedSeconds;
+    const isWarning = remaining <= 10 && remaining > 0;
+
+    statusEl.textContent = `${message} (剩余 ${remaining}s)`;
+    statusEl.className = 'st-pd-status generating';
+    if (isWarning) {
+        statusEl.style.color = '#ff9800';
+    } else {
+        statusEl.style.color = '';
+    }
+}
+
+function updateGeneratingStatus(message, elapsedSeconds) {
+    const statusEl = document.getElementById('st_pd_status');
+    if (!statusEl) return;
+
+    statusEl.textContent = `${message} (已用时 ${elapsedSeconds}s)`;
+    statusEl.className = 'st-pd-status generating';
+    statusEl.style.color = '';
+}
+
+function clearStatusInterval() {
+    if (statusUpdateInterval) {
+        clearInterval(statusUpdateInterval);
+        statusUpdateInterval = null;
+    }
 }
 
 function showLLMOutput(text) {
@@ -120,10 +319,26 @@ async function waitForChatu8Complete(settings) {
     // Phase 2: Wait for chatu8 to FINISH (loading class removed)
     log('chatu8 is generating, waiting for it to finish...');
 
+    // 启动状态更新
+    const totalSeconds = Math.floor(timeoutMs / 1000);
+    clearStatusInterval();
+    statusUpdateInterval = setInterval(() => {
+        const elapsed = Math.floor((Date.now() - startTime) / 1000);
+        updateWaitingStatus('⏳ 等待 chatu8 完成...', elapsed, totalSeconds);
+    }, 1000);
+
     return new Promise((resolve) => {
+        let timeoutId = null;
+
+        const cleanup = () => {
+            observer.disconnect();
+            clearStatusInterval();
+            if (timeoutId) clearTimeout(timeoutId);
+        };
+
         const observer = new MutationObserver(() => {
             if (!fab.classList.contains('st-chatu8-fab-loading')) {
-                observer.disconnect();
+                cleanup();
                 log(`chatu8 finished (${((Date.now() - startTime) / 1000).toFixed(1)}s).`);
                 resolve();
             }
@@ -132,15 +347,15 @@ async function waitForChatu8Complete(settings) {
 
         // Also check immediately in case it already finished during setup
         if (!fab.classList.contains('st-chatu8-fab-loading')) {
-            observer.disconnect();
+            cleanup();
             log(`chatu8 finished (${((Date.now() - startTime) / 1000).toFixed(1)}s).`);
             resolve();
             return;
         }
 
-        setTimeout(() => {
-            observer.disconnect();
-            log('WARNING: chatu8 wait timed out, continuing anyway.');
+        timeoutId = setTimeout(() => {
+            cleanup();
+            log('chatu8 wait timed out, continuing anyway.', 'WARN');
             resolve();
         }, timeoutMs);
     });
@@ -216,6 +431,33 @@ function loadPresetToEditor(settings) {
 // ---- API Config Helpers ----
 
 const API_CONFIG_FIELDS = ['connectionMode', 'apiType', 'apiUrl', 'apiKey', 'model', 'temperature', 'maxTokens', 'contextLength'];
+
+function applyApiTemplate(settings, templateKey) {
+    const template = API_TEMPLATES[templateKey];
+    if (!template) return;
+
+    settings.connectionMode = template.connectionMode;
+    settings.apiType = template.apiType;
+    settings.apiUrl = template.apiUrl;
+    settings.model = template.model;
+    settings.temperature = template.temperature;
+    settings.maxTokens = template.maxTokens;
+
+    // 清空 API Key（避免误用旧的 Key）
+    settings.apiKey = '';
+
+    // 更新 UI
+    document.getElementById('st_pd_connection_mode').value = template.connectionMode;
+    document.getElementById('st_pd_api_type').value = template.apiType;
+    document.getElementById('st_pd_api_url').value = template.apiUrl;
+    document.getElementById('st_pd_model').value = template.model;
+    document.getElementById('st_pd_temperature').value = template.temperature;
+    document.getElementById('st_pd_max_tokens').value = template.maxTokens;
+    document.getElementById('st_pd_api_key').value = '';
+
+    saveSettings();
+    toastr.success(`已应用 ${template.name} 模板，请填写 API Key`);
+}
 
 function populateApiConfigDropdown(settings) {
     const select = document.getElementById('st_pd_api_config_select');
@@ -367,7 +609,7 @@ function applyRegexRules(messages, rules) {
         try {
             compiled.push({ regex: new RegExp(rule.pattern, rule.flags || 'g'), replacement: rule.replacement || '', label: rule.label || rule.pattern });
         } catch (e) {
-            log(`WARNING: Invalid regex "${rule.pattern}" (${rule.label || 'unnamed'}): ${e.message}. Skipping.`);
+            log(`Invalid regex "${rule.pattern}" (${rule.label || 'unnamed'}): ${e.message}. Skipping.`, 'WARN');
         }
     }
 
@@ -390,11 +632,27 @@ async function callDirectorLLM(settings, signal) {
 
     showInputLog(messages);
 
-    const options = { signal };
-    if (settings.connectionMode === 'proxy') {
-        return await generateViaProxy(messages, settings, context.getRequestHeaders, options);
-    } else {
-        return await generateDirect(messages, settings, options);
+    // 启动生成状态更新
+    const startTime = Date.now();
+    clearStatusInterval();
+    statusUpdateInterval = setInterval(() => {
+        const elapsed = Math.floor((Date.now() - startTime) / 1000);
+        updateGeneratingStatus('🤖 导演 LLM 生成中...', elapsed);
+    }, 1000);
+
+    try {
+        const options = { signal };
+        let result;
+        if (settings.connectionMode === 'proxy') {
+            result = await generateViaProxy(messages, settings, context.getRequestHeaders, options);
+        } else {
+            result = await generateDirect(messages, settings, options);
+        }
+        clearStatusInterval();
+        return result;
+    } catch (error) {
+        clearStatusInterval();
+        throw error;
     }
 }
 
@@ -502,7 +760,7 @@ async function runDirectorRound() {
         const direction = await callDirectorLLM(settings, currentAbortController.signal);
 
         if (!direction || !direction.trim()) {
-            log('WARNING: Director LLM returned empty response. Skipping this round.');
+            log('Director LLM returned empty response. Skipping this round.', 'WARN');
             toastr.warning('Director LLM returned empty response.');
             isProcessing = false;
             updateStatusUI(settings);
@@ -562,8 +820,7 @@ async function runDirectorRound() {
         if (err.name === 'AbortError') {
             log('Director LLM request aborted.');
         } else {
-            log(`ERROR: ${err.message}`);
-            toastr.error(`Plot Director error: ${err.message}`);
+            handleError(err, 'Plot Director');
         }
         isProcessing = false;
         stopDirector(settings);
@@ -582,7 +839,7 @@ async function startDirector(settings) {
 
     const preset = getCurrentPreset(settings);
     if (!preset || !preset.system_prompt) {
-        toastr.warning('Please select a preset with a system prompt.');
+        toastr.warning(ERROR_MESSAGES.NO_PRESET);
         return;
     }
 
@@ -592,7 +849,7 @@ async function startDirector(settings) {
             return;
         }
         if (!settings.model?.trim()) {
-            toastr.warning('Please set a model name.');
+            toastr.warning(ERROR_MESSAGES.NO_MODEL);
             return;
         }
     } else if (!settings.model?.trim()) {
@@ -860,6 +1117,67 @@ function bindPromptManagerUI(settings) {
         toastr.success(`Block "${result.trim()}" added.`);
     });
 
+    // 添加基础模板按钮
+    document.getElementById('st_pd_pm_add_template')?.addEventListener('click', async () => {
+        const preset = getCurrentPreset(settings);
+        if (!preset?.prompt_manager) return;
+
+        // 检查是否已有基础块
+        const hasSystemPrompt = preset.prompt_manager.blocks.some(b => b.type === 'system_prompt');
+        const hasChatHistory = preset.prompt_manager.blocks.some(b => b.type === 'chat_history');
+        const hasPlotOutline = preset.prompt_manager.blocks.some(b => b.type === 'plot_outline');
+
+        if (hasSystemPrompt && hasChatHistory && hasPlotOutline) {
+            toastr.info('基础模板块已存在');
+            return;
+        }
+
+        // 如果有自定义块，警告用户
+        const hasCustomBlocks = preset.prompt_manager.blocks.some(b => b.type === 'custom');
+        if (hasCustomBlocks) {
+            const context = SillyTavern.getContext();
+            const confirmed = await context.callGenericPopup(
+                '应用基础模板将清空所有现有块（包括自定义块）。是否继续？',
+                context.POPUP_TYPE.CONFIRM
+            );
+            if (confirmed !== 1 && confirmed !== true) {
+                return;
+            }
+        }
+
+        // 清空现有块并添加基础模板
+        preset.prompt_manager.blocks = [
+            {
+                id: 'system_prompt',
+                type: 'system_prompt',
+                role: 'system',
+                label: 'System Prompt',
+                enabled: true,
+                fixed: true,
+            },
+            {
+                id: 'chat_history',
+                type: 'chat_history',
+                role: 'user',
+                label: 'Chat History',
+                enabled: true,
+                fixed: true,
+            },
+            {
+                id: 'plot_outline',
+                type: 'plot_outline',
+                role: 'user',
+                label: 'Plot Outline',
+                enabled: false,
+                fixed: true,
+            },
+        ];
+
+        saveSettings();
+        renderPromptManager(settings);
+        toastr.success('已应用基础 Prompt 模板');
+    });
+
     // Sync outline checkbox -> prompt manager block
     const outlineCheckbox = document.getElementById('st_pd_outline_enabled');
     if (outlineCheckbox) {
@@ -1071,6 +1389,32 @@ function bindRegexUI(settings) {
         renderRegexRules(settings);
     });
 
+    // 添加示例按钮
+    document.getElementById('st_pd_regex_add_examples')?.addEventListener('click', () => {
+        if (!settings.regexRules) settings.regexRules = [];
+
+        // 检查是否已存在相同 pattern 的规则
+        const existingPatterns = new Set(settings.regexRules.map(r => r.pattern));
+        const newExamples = REGEX_EXAMPLES.filter(ex => !existingPatterns.has(ex.pattern));
+
+        if (newExamples.length === 0) {
+            toastr.info('所有示例规则已存在');
+            return;
+        }
+
+        // 添加新示例规则
+        for (const example of newExamples) {
+            settings.regexRules.push({
+                id: 'regex_' + Date.now() + '_' + Math.random(),
+                ...example,
+            });
+        }
+
+        saveSettings();
+        renderRegexRules(settings);
+        toastr.success(`已添加 ${newExamples.length} 个新示例`);
+    });
+
     renderRegexRules(settings);
 }
 
@@ -1216,6 +1560,15 @@ function bindSettingsUI(settings) {
     // API Config management
     populateApiConfigDropdown(settings);
 
+    // API 模板选择
+    document.getElementById('st_pd_api_template')?.addEventListener('change', (e) => {
+        const templateKey = e.target.value;
+        if (templateKey) {
+            applyApiTemplate(settings, templateKey);
+            e.target.value = ''; // 重置选择
+        }
+    });
+
     document.getElementById('st_pd_api_config_select')?.addEventListener('change', (e) => {
         settings.selectedApiConfig = e.target.value;
         if (settings.selectedApiConfig) {
@@ -1262,15 +1615,32 @@ function bindSettingsUI(settings) {
 
     document.getElementById('st_pd_test_connection')?.addEventListener('click', async () => {
         const context = SillyTavern.getContext();
-        log('Testing API connection...');
-        toastr.info('Testing connection...');
+        const btn = document.getElementById('st_pd_test_connection');
+
+        log('测试 API 连接...');
+        toastr.info('测试连接中...');
+
+        // 禁用按钮
+        if (btn) {
+            btn.disabled = true;
+            btn.style.opacity = '0.5';
+        }
+
+        const startTime = Date.now();
         const result = await testConnection(settings, context.getRequestHeaders);
+        const elapsed = ((Date.now() - startTime) / 1000).toFixed(2);
+
+        // 恢复按钮
+        if (btn) {
+            btn.disabled = false;
+            btn.style.opacity = '1';
+        }
+
         if (result.success) {
-            log(`Connection test OK: ${result.message}`);
-            toastr.success(result.message);
+            log(`连接测试成功 (${elapsed}s): ${result.message}`);
+            toastr.success(`连接成功！延迟: ${elapsed}s`);
         } else {
-            log(`Connection test FAILED: ${result.message}`);
-            toastr.error(result.message);
+            handleError(new Error(result.message), '连接测试');
         }
     });
 
@@ -1326,10 +1696,40 @@ function bindSettingsUI(settings) {
 
     document.getElementById('st_pd_log_clear')?.addEventListener('click', () => {
         logEntries.length = 0;
-        const el = document.getElementById('st_pd_log');
-        if (el) el.value = '';
+        updateLogDisplay();
         toastr.info('Log cleared.');
     });
+
+    // 日志过滤按钮
+    document.getElementById('st_pd_log_filter_all')?.addEventListener('click', () => {
+        currentLogFilter = 'all';
+        updateLogDisplay();
+        updateLogFilterButtons();
+    });
+
+    document.getElementById('st_pd_log_filter_warn')?.addEventListener('click', () => {
+        currentLogFilter = 'warn';
+        updateLogDisplay();
+        updateLogFilterButtons();
+    });
+
+    document.getElementById('st_pd_log_filter_error')?.addEventListener('click', () => {
+        currentLogFilter = 'error';
+        updateLogDisplay();
+        updateLogFilterButtons();
+    });
+
+    function updateLogFilterButtons() {
+        const allBtn = document.getElementById('st_pd_log_filter_all');
+        const warnBtn = document.getElementById('st_pd_log_filter_warn');
+        const errorBtn = document.getElementById('st_pd_log_filter_error');
+
+        if (allBtn) allBtn.style.opacity = currentLogFilter === 'all' ? '1' : '0.6';
+        if (warnBtn) warnBtn.style.opacity = currentLogFilter === 'warn' ? '1' : '0.6';
+        if (errorBtn) errorBtn.style.opacity = currentLogFilter === 'error' ? '1' : '0.6';
+    }
+
+    updateLogFilterButtons();
 
     // Preset management
     bindPresetUI(settings);
@@ -1349,13 +1749,20 @@ function bindPresetUI(settings) {
     loadPresetToEditor(settings);
 
     selectEl?.addEventListener('change', () => {
-        settings.selectedPreset = selectEl.value;
+        const newPreset = selectEl.value;
+        if (!confirmSwitchPreset(newPreset)) {
+            selectEl.value = settings.selectedPreset; // 恢复原选择
+            return;
+        }
+        settings.selectedPreset = newPreset;
         loadPresetToEditor(settings);
         renderPromptManager(settings);
         saveSettings();
+        markConfigAsSaved();
     });
 
     promptEl?.addEventListener('input', () => {
+        markConfigAsChanged();
         const preset = getCurrentPreset(settings);
         if (preset) {
             preset.system_prompt = promptEl.value;
@@ -1443,6 +1850,7 @@ function bindPresetUI(settings) {
             preset.system_prompt = promptEl.value;
             saveSettings();
             renderPromptManager(settings);
+            markConfigAsSaved();
             toastr.success(`Preset "${settings.selectedPreset}" saved.`);
         } else {
             toastr.warning('No preset selected.');

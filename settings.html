@@ -59,6 +59,17 @@
             <span data-i18n="API Configuration">API Configuration</span>
         </div>
 
+        <div class="st-pd-row">
+            <label>快速模板</label>
+            <select id="st_pd_api_template">
+                <option value="">选择模板...</option>
+                <option value="openai">OpenAI</option>
+                <option value="claude">Claude (Direct)</option>
+                <option value="ollama">Ollama (Local)</option>
+                <option value="proxy">SillyTavern Proxy</option>
+            </select>
+        </div>
+
         <div class="st-pd-preset-row" style="margin-bottom: 6px;">
             <select id="st_pd_api_config_select"></select>
             <div class="menu_button" id="st_pd_api_config_save" title="Save"><i class="fa-solid fa-floppy-disk"></i></div>
@@ -124,6 +135,7 @@
         <div class="st-pd-section-title">
             <i class="fa-solid fa-sliders"></i>
             <span data-i18n="System Prompt Preset">System Prompt Preset</span>
+            <span id="st_pd_unsaved_indicator" style="display:none; color: orange; margin-left: 5px;" title="有未保存的更改">*</span>
         </div>
 
         <div class="st-pd-preset-row">
@@ -160,6 +172,9 @@
                 <div class="menu_button" id="st_pd_pm_add_block">
                     <i class="fa-solid fa-plus"></i> <span data-i18n="Add Block">Add Block</span>
                 </div>
+                <div class="menu_button" id="st_pd_pm_add_template">
+                    <i class="fa-solid fa-lightbulb"></i> 应用基础模板
+                </div>
             </div>
         </div>
 
@@ -178,6 +193,9 @@
         <div class="st-pd-btn-row" style="margin-bottom: 6px;">
             <div class="menu_button" id="st_pd_regex_add_rule">
                 <i class="fa-solid fa-plus"></i> <span data-i18n="Add Rule">Add Rule</span>
+            </div>
+            <div class="menu_button" id="st_pd_regex_add_examples">
+                <i class="fa-solid fa-lightbulb"></i> 添加常用示例
             </div>
         </div>
 
@@ -238,6 +256,9 @@
             <span data-i18n="Log">Log</span>
         </div>
         <div class="st-pd-btn-row" style="margin-bottom: 6px;">
+            <div class="menu_button" id="st_pd_log_filter_all">全部</div>
+            <div class="menu_button" id="st_pd_log_filter_warn">仅警告</div>
+            <div class="menu_button" id="st_pd_log_filter_error">仅错误</div>
             <div class="menu_button" id="st_pd_log_export" data-i18n="Export Log">Export Log</div>
             <div class="menu_button" id="st_pd_log_clear" data-i18n="Clear Log">Clear Log</div>
         </div>
