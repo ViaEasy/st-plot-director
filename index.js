@@ -286,8 +286,18 @@ function showLLMOutput(text) {
 function showInputLog(messages) {
     const el = document.getElementById('st_pd_input_log');
     if (!el) return;
-    const text = messages.map(m => `[${m.role}]\n${m.content}`).join('\n\n---\n\n');
-    el.value = text;
+
+    let logText = '=== Messages sent to Director LLM ===\n\n';
+
+    for (let i = 0; i < messages.length; i++) {
+        const msg = messages[i];
+        logText += `Message ${i + 1}:\n`;
+        logText += `Role: ${msg.role}\n`;
+        logText += `Content:\n${msg.content}\n`;
+        logText += '\n' + '-'.repeat(50) + '\n\n';
+    }
+
+    el.value = logText;
     el.scrollTop = 0;
 }
 
@@ -524,30 +534,33 @@ function buildChatHistory(chat, settings, mode) {
     const filtered = recentChat.filter(msg => !(msg.is_system && !msg.is_user));
 
     if (mode === 'text') {
+        // Text mode: simple concatenation
         let chatText = '';
         for (const msg of filtered) {
             const name = msg.name || (msg.is_user ? 'User' : 'Character');
             chatText += `${name}: ${msg.mes}\n\n`;
         }
-        return chatText.trim() ? [{ role: 'user', content: chatText.trim() }] : [];
+        return chatText.trim();
     }
 
-    // Role mode: preserve user/assistant roles, merge adjacent same-role
-    const rawMessages = filtered.map(msg => ({
-        role: msg.is_user ? 'user' : 'assistant',
-        content: msg.mes,
-    }));
-
-    const merged = [];
-    for (const msg of rawMessages) {
-        if (merged.length > 0 && merged[merged.length - 1].role === msg.role) {
-            merged[merged.length - 1].content += '\n\n' + msg.content;
-        } else {
-            merged.push({ ...msg });
-        }
+    // Role mode: show role information
+    let chatText = '';
+    for (const msg of filtered) {
+        const role = msg.is_user ? 'user' : 'assistant';
+        const name = msg.name || (msg.is_user ? 'User' : 'Character');
+        chatText += `[${role}] ${name}: ${msg.mes}\n\n`;
     }
+    return chatText.trim();
+}
 
-    return merged;
+function shouldInjectOutlineToLLM(settings) {
+    if (!settings.outlineEnabled) return false;
+    if (!settings.outline?.trim()) return false;
+
+    const currentRound = settings.currentRound || 0;
+    const maxRounds = settings.outlinePromptRounds || 999;
+
+    return currentRound < maxRounds;
 }
 
 function buildMessages(settings) {
@@ -556,54 +569,64 @@ function buildMessages(settings) {
     const preset = getCurrentPreset(settings);
     const pmConfig = preset?.prompt_manager || getDefaultPromptManagerConfig();
 
-    const messages = [];
+    // Collect all enabled block contents
+    const contentParts = [];
 
     for (const block of pmConfig.blocks) {
         if (!block.enabled) continue;
 
+        let blockContent = '';
+
+        // Get actual content for each block
         switch (block.id) {
             case 'system_prompt':
-                if (preset?.system_prompt) {
-                    messages.push({ role: 'system', content: preset.system_prompt });
-                }
+                blockContent = preset?.system_prompt || '';
                 break;
 
             case 'plot_outline':
-                // 检查 outline 是否启用、有内容、且在轮数限制内
-                const shouldInjectToLLM = settings.outlineEnabled
-                    && settings.outline?.trim()
-                    && settings.currentRound <= settings.outlinePromptRounds;
-
-                if (shouldInjectToLLM) {
-                    messages.push({
-                        role: 'system',
-                        content: `[Plot Outline]\n${settings.outline.trim()}`,
-                    });
+                if (shouldInjectOutlineToLLM(settings)) {
+                    blockContent = settings.outline || '';
                 }
                 break;
 
-            case 'chat_history': {
-                const historyMessages = buildChatHistory(chat, settings, pmConfig.chatHistoryMode);
-                messages.push(...historyMessages);
+            case 'chat_history':
+                blockContent = buildChatHistory(chat, settings, pmConfig.chatHistoryMode);
                 break;
-            }
 
             case 'instruction':
-                if (block.content?.trim()) {
-                    messages.push({ role: block.role || 'user', content: block.content.trim() });
-                }
+                blockContent = block.content || '';
                 break;
 
             default:
                 // Custom blocks
-                if (block.type === 'custom' && block.content?.trim()) {
-                    messages.push({ role: block.role || 'user', content: block.content.trim() });
+                if (block.type === 'custom') {
+                    blockContent = block.content || '';
                 }
                 break;
         }
+
+        // Skip empty content
+        if (!blockContent.trim()) continue;
+
+        // Wrap with tag if tagName exists
+        if (block.tagName && block.tagName.trim()) {
+            const tagName = block.tagName.trim();
+            blockContent = `<${tagName}>\n${blockContent}\n</${tagName}>`;
+        }
+
+        contentParts.push(blockContent);
     }
 
-    return messages;
+    // Merge all content into a single message
+    const mergedContent = contentParts.join('\n\n');
+
+    // Return single user message
+    return [
+        {
+            role: 'user',
+            content: mergedContent
+        }
+    ];
 }
 
 function applyRegexRules(messages, rules) {
@@ -946,6 +969,11 @@ function renderPromptManager(settings) {
         const preview = getBlockContentPreview(block, settings);
         const previewText = preview.length > 50 ? preview.substring(0, 50) + '...' : preview;
 
+        // Tag name display in header
+        const tagDisplay = block.tagName
+            ? `<span class="st-pd-pm-block-tag-display">&lt;${escapeHtml(block.tagName)}&gt;</span>`
+            : '';
+
         let actionsHtml = '';
         if (block.type === 'fixed') {
             actionsHtml += '<i class="fa-solid fa-lock st-pd-pm-block-fixed-icon" title="Fixed block"></i>';
@@ -961,6 +989,7 @@ function renderPromptManager(settings) {
                 <i class="fa-solid fa-grip-vertical st-pd-pm-drag-handle"></i>
                 <span class="st-pd-pm-block-role ${roleClass}">${block.role || 'user'}</span>
                 <span class="st-pd-pm-block-label">${escapeHtml(block.label)}</span>
+                ${tagDisplay}
                 <span class="st-pd-pm-block-preview">${escapeHtml(previewText)}</span>
                 <div class="st-pd-pm-block-actions">${actionsHtml}</div>
             </div>
@@ -986,10 +1015,49 @@ function renderPromptManager(settings) {
             body.appendChild(textarea);
         } else {
             const previewDiv = document.createElement('div');
-            previewDiv.style.cssText = 'font-size:0.85em;opacity:0.7;white-space:pre-wrap;max-height:120px;overflow-y:auto;';
+            previewDiv.className = 'st-pd-pm-block-content-preview';
             previewDiv.textContent = getBlockContentPreview(block, settings);
             body.appendChild(previewDiv);
         }
+
+        // Add Tag Name input row
+        const tagNameRow = document.createElement('div');
+        tagNameRow.className = 'st-pd-pm-block-tag-row';
+
+        const tagLabel = document.createElement('label');
+        tagLabel.className = 'st-pd-pm-block-tag-label';
+        tagLabel.textContent = 'Tag Name (optional):';
+        tagNameRow.appendChild(tagLabel);
+
+        const tagInput = document.createElement('input');
+        tagInput.type = 'text';
+        tagInput.className = 'st-pd-pm-block-tag-input text_pole';
+        tagInput.value = block.tagName || '';
+        tagInput.placeholder = 'e.g., history log, plot outline';
+        tagInput.maxLength = 50;
+        tagNameRow.appendChild(tagInput);
+
+        tagInput.addEventListener('input', () => {
+            block.tagName = tagInput.value;
+            saveSettings();
+            // Update tag display in header
+            const tagDisplayEl = blockEl.querySelector('.st-pd-pm-block-tag-display');
+            if (block.tagName && block.tagName.trim()) {
+                if (tagDisplayEl) {
+                    tagDisplayEl.textContent = `<${block.tagName.trim()}>`;
+                } else {
+                    const labelEl = blockEl.querySelector('.st-pd-pm-block-label');
+                    const newTagDisplay = document.createElement('span');
+                    newTagDisplay.className = 'st-pd-pm-block-tag-display';
+                    newTagDisplay.textContent = `<${block.tagName.trim()}>`;
+                    labelEl.insertAdjacentElement('afterend', newTagDisplay);
+                }
+            } else if (tagDisplayEl) {
+                tagDisplayEl.remove();
+            }
+        });
+
+        body.appendChild(tagNameRow);
 
         if (block.type === 'custom') {
             const roleSelect = document.createElement('select');
@@ -1117,6 +1185,7 @@ function bindPromptManagerUI(settings) {
             label: result.trim(),
             enabled: true,
             content: '',
+            tagName: '',
         };
 
         preset.prompt_manager.blocks.push(newBlock);
@@ -1131,9 +1200,9 @@ function bindPromptManagerUI(settings) {
         if (!preset?.prompt_manager) return;
 
         // 检查是否已有基础块
-        const hasSystemPrompt = preset.prompt_manager.blocks.some(b => b.type === 'system_prompt');
-        const hasChatHistory = preset.prompt_manager.blocks.some(b => b.type === 'chat_history');
-        const hasPlotOutline = preset.prompt_manager.blocks.some(b => b.type === 'plot_outline');
+        const hasSystemPrompt = preset.prompt_manager.blocks.some(b => b.id === 'system_prompt');
+        const hasChatHistory = preset.prompt_manager.blocks.some(b => b.id === 'chat_history');
+        const hasPlotOutline = preset.prompt_manager.blocks.some(b => b.id === 'plot_outline');
 
         if (hasSystemPrompt && hasChatHistory && hasPlotOutline) {
             toastr.info('基础模板块已存在');
@@ -1157,27 +1226,30 @@ function bindPromptManagerUI(settings) {
         preset.prompt_manager.blocks = [
             {
                 id: 'system_prompt',
-                type: 'system_prompt',
+                type: 'fixed',
                 role: 'system',
                 label: 'System Prompt',
                 enabled: true,
-                fixed: true,
+                content: null,
+                tagName: '',
             },
             {
                 id: 'chat_history',
-                type: 'chat_history',
-                role: 'user',
+                type: 'fixed',
+                role: 'special',
                 label: 'Chat History',
                 enabled: true,
-                fixed: true,
+                content: null,
+                tagName: 'history log',
             },
             {
                 id: 'plot_outline',
-                type: 'plot_outline',
-                role: 'user',
+                type: 'fixed',
+                role: 'system',
                 label: 'Plot Outline',
                 enabled: false,
-                fixed: true,
+                content: null,
+                tagName: 'plot outline',
             },
         ];
 

@@ -7,10 +7,10 @@
     "prompt_manager": {
         "chatHistoryMode": "role",
         "blocks": [
-            { "id": "system_prompt", "type": "fixed", "role": "system", "label": "System Prompt", "enabled": true, "content": null },
-            { "id": "plot_outline", "type": "fixed", "role": "system", "label": "Plot Outline", "enabled": true, "content": null },
-            { "id": "chat_history", "type": "fixed", "role": "special", "label": "Chat History", "enabled": true, "content": null },
-            { "id": "instruction", "type": "fixed", "role": "user", "label": "Instruction", "enabled": true, "content": "Based on the conversation above, generate the next plot direction." }
+            { "id": "system_prompt", "type": "fixed", "role": "system", "label": "System Prompt", "enabled": true, "content": null, "tagName": "" },
+            { "id": "plot_outline", "type": "fixed", "role": "system", "label": "Plot Outline", "enabled": true, "content": null, "tagName": "plot outline" },
+            { "id": "chat_history", "type": "fixed", "role": "special", "label": "Chat History", "enabled": true, "content": null, "tagName": "history log" },
+            { "id": "instruction", "type": "fixed", "role": "user", "label": "Instruction", "enabled": true, "content": "Based on the conversation above, generate the next plot direction.", "tagName": "" }
         ]
     }
 }

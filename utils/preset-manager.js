@@ -49,10 +49,10 @@ export async function initPresets(settings, extensionUrl) {
  * Uses "text" mode to preserve existing behavior.
  */
 const DEFAULT_PM_BLOCKS = [
-    { id: 'system_prompt', type: 'fixed', role: 'system', label: 'System Prompt', enabled: true, content: null },
-    { id: 'plot_outline', type: 'fixed', role: 'system', label: 'Plot Outline', enabled: true, content: null },
-    { id: 'chat_history', type: 'fixed', role: 'special', label: 'Chat History', enabled: true, content: null },
-    { id: 'instruction', type: 'fixed', role: 'user', label: 'Instruction', enabled: true, content: 'Based on the conversation above, generate the next plot direction.' },
+    { id: 'system_prompt', type: 'fixed', role: 'system', label: 'System Prompt', enabled: true, content: null, tagName: '' },
+    { id: 'plot_outline', type: 'fixed', role: 'system', label: 'Plot Outline', enabled: true, content: null, tagName: 'plot outline' },
+    { id: 'chat_history', type: 'fixed', role: 'special', label: 'Chat History', enabled: true, content: null, tagName: 'history log' },
+    { id: 'instruction', type: 'fixed', role: 'user', label: 'Instruction', enabled: true, content: 'Based on the conversation above, generate the next plot direction.', tagName: '' },
 ];
 
 /**
@@ -75,8 +75,26 @@ export function getDefaultPromptManagerConfig(chatHistoryMode = 'role') {
  */
 export function ensurePromptManagerConfig(preset) {
     if (!preset) return;
-    if (preset.prompt_manager) return;
-    preset.prompt_manager = getDefaultPromptManagerConfig('text');
+    if (!preset.prompt_manager) {
+        preset.prompt_manager = getDefaultPromptManagerConfig('text');
+        return;
+    }
+
+    // Migrate old blocks without tagName field
+    if (preset.prompt_manager.blocks) {
+        for (const block of preset.prompt_manager.blocks) {
+            if (block.tagName === undefined) {
+                // Set default tagName based on block id
+                if (block.id === 'chat_history') {
+                    block.tagName = 'history log';
+                } else if (block.id === 'plot_outline') {
+                    block.tagName = 'plot outline';
+                } else {
+                    block.tagName = '';
+                }
+            }
+        }
+    }
 }
 
 /**
