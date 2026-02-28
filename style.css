@@ -589,3 +589,30 @@
     max-height: 100px;
     overflow-y: auto;
 }
+
+/* Model wrapper with refresh button */
+.st-pd-model-wrapper {
+    flex: 1;
+    display: flex;
+    gap: 4px;
+    align-items: center;
+}
+
+.st-pd-model-wrapper input {
+    flex: 1;
+}
+
+.st-pd-model-refresh.loading i {
+    animation: st-pd-spin 1s linear infinite;
+}
+
+@keyframes st-pd-spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+
+/* Streaming hint */
+.st-pd-hint {
+    font-size: 0.85em;
+    opacity: 0.6;
+}

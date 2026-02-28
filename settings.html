@@ -90,6 +90,7 @@
 
         <div class="st-pd-preset-row" style="margin-bottom: 6px;">
             <select id="st_pd_api_config_select"></select>
+            <div class="menu_button" id="st_pd_api_config_new" title="New Config"><i class="fa-solid fa-plus"></i></div>
             <div class="menu_button" id="st_pd_api_config_save" title="Save"><i class="fa-solid fa-floppy-disk"></i></div>
             <div class="menu_button" id="st_pd_api_config_delete" title="Delete"><i class="fa-solid fa-trash"></i></div>
         </div>
@@ -125,7 +126,13 @@
 
         <div class="st-pd-row">
             <label data-i18n="Model">Model</label>
-            <input type="text" id="st_pd_model" placeholder="gpt-4o-mini" />
+            <div class="st-pd-model-wrapper">
+                <input type="text" id="st_pd_model" list="st_pd_model_list" placeholder="gpt-4o-mini" />
+                <datalist id="st_pd_model_list"></datalist>
+                <div class="menu_button st-pd-model-refresh" id="st_pd_fetch_models" title="Fetch model list">
+                    <i class="fa-solid fa-rotate"></i>
+                </div>
+            </div>
         </div>
 
         <div class="st-pd-row">
@@ -141,6 +148,12 @@
         <div class="st-pd-row">
             <label data-i18n="Context Messages">Context Messages</label>
             <input type="number" id="st_pd_context_length" min="1" max="100" value="20" title="Number of recent messages to include" />
+        </div>
+
+        <div class="st-pd-row">
+            <label>Streaming</label>
+            <input type="checkbox" id="st_pd_streaming" />
+            <span class="st-pd-hint">Enable streaming output</span>
         </div>
 
         <div class="st-pd-btn-row">

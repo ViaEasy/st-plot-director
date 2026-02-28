@@ -5,7 +5,7 @@
  * and sends them as user messages to drive the narrative forward.
  */
 
-import { generateViaProxy, generateDirect, testConnection } from './utils/api.js';
+import { generateViaProxy, generateDirect, testConnection, fetchModels } from './utils/api.js';
 import {
     initPresets, getCurrentPreset, savePreset, deletePreset,
     exportPreset, importPreset, getPresetNames, getDefaultPromptManagerConfig,
@@ -105,6 +105,7 @@ const defaultSettings = Object.freeze({
     temperature: 0.8,
     maxTokens: 300,
     contextLength: 20,
+    streaming: false,
     outlineEnabled: false,
     outline: '',
     outlineInjectRounds: 1,
@@ -448,7 +449,7 @@ function loadPresetToEditor(settings) {
 
 // ---- API Config Helpers ----
 
-const API_CONFIG_FIELDS = ['connectionMode', 'apiType', 'apiUrl', 'apiKey', 'model', 'temperature', 'maxTokens', 'contextLength'];
+const API_CONFIG_FIELDS = ['connectionMode', 'apiType', 'apiUrl', 'apiKey', 'model', 'temperature', 'maxTokens', 'contextLength', 'streaming'];
 
 function applyApiTemplate(settings, templateKey) {
     const template = API_TEMPLATES[templateKey];
@@ -517,6 +518,8 @@ function loadApiConfigToUI(settings) {
         const el = document.getElementById(id);
         if (el) el.value = settings[key];
     }
+    const streamingEl = document.getElementById('st_pd_streaming');
+    if (streamingEl) streamingEl.checked = !!settings.streaming;
 }
 
 function extractApiConfig(settings) {
@@ -672,7 +675,18 @@ async function callDirectorLLM(settings, signal) {
     }, 1000);
 
     try {
-        const options = { signal };
+        const outputEl = document.getElementById('st_pd_llm_output');
+        const options = {
+            signal,
+            streaming: settings.streaming,
+            onToken: (token) => {
+                if (outputEl) outputEl.value += token;
+            },
+        };
+
+        // Clear output area before streaming starts
+        if (settings.streaming && outputEl) outputEl.value = '';
+
         let result;
         if (settings.connectionMode === 'proxy') {
             result = await generateViaProxy(messages, settings, context.getRequestHeaders, options);
@@ -1637,6 +1651,15 @@ function bindSettingsUI(settings) {
         });
     }
 
+    const streamingEl = document.getElementById('st_pd_streaming');
+    if (streamingEl) {
+        streamingEl.checked = !!settings.streaming;
+        streamingEl.addEventListener('change', () => {
+            settings.streaming = streamingEl.checked;
+            saveSettings();
+        });
+    }
+
     // API Config management
     populateApiConfigDropdown(settings);
 
@@ -1655,6 +1678,23 @@ function bindSettingsUI(settings) {
             loadApiConfigToUI(settings);
         }
         saveSettings();
+    });
+
+    document.getElementById('st_pd_api_config_new')?.addEventListener('click', async () => {
+        const context = SillyTavern.getContext();
+        const result = await context.callGenericPopup('Enter a name for the new API configuration:', context.POPUP_TYPE.INPUT);
+        if (!result || typeof result !== 'string' || !result.trim()) return;
+        const trimmed = result.trim();
+        if (!settings.apiConfigs) settings.apiConfigs = {};
+        if (settings.apiConfigs[trimmed]) {
+            toastr.warning(`API config "${trimmed}" already exists.`);
+            return;
+        }
+        settings.apiConfigs[trimmed] = extractApiConfig(settings);
+        settings.selectedApiConfig = trimmed;
+        populateApiConfigDropdown(settings);
+        saveSettings();
+        toastr.success(`API config "${trimmed}" created.`);
     });
 
     document.getElementById('st_pd_api_config_save')?.addEventListener('click', async () => {
@@ -1721,6 +1761,34 @@ function bindSettingsUI(settings) {
             toastr.success(`连接成功！延迟: ${elapsed}s`);
         } else {
             handleError(new Error(result.message), '连接测试');
+        }
+    });
+
+    document.getElementById('st_pd_fetch_models')?.addEventListener('click', async () => {
+        const btn = document.getElementById('st_pd_fetch_models');
+        if (!settings.apiUrl) {
+            toastr.warning('Please set API URL first.');
+            return;
+        }
+
+        if (btn) btn.classList.add('loading');
+
+        try {
+            const models = await fetchModels(settings);
+            const datalist = document.getElementById('st_pd_model_list');
+            if (datalist) {
+                datalist.innerHTML = '';
+                for (const modelId of models) {
+                    const option = document.createElement('option');
+                    option.value = modelId;
+                    datalist.appendChild(option);
+                }
+            }
+            toastr.success(`Fetched ${models.length} models.`);
+        } catch (err) {
+            toastr.error(`Failed to fetch models: ${err.message}`);
+        } finally {
+            if (btn) btn.classList.remove('loading');
         }
     });
 
