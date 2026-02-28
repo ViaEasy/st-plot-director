@@ -31,6 +31,7 @@ const defaultSettings = Object.freeze({
     outlineEnabled: false,
     outline: '',
     outlineInjectRounds: 1,
+    outlinePromptRounds: 999,
     waitForChatu8: true,
     chatu8StartTimeout: 15,
     chatu8Timeout: 300,
@@ -318,7 +319,12 @@ function buildMessages(settings) {
                 break;
 
             case 'plot_outline':
-                if (settings.outlineEnabled && settings.outline?.trim()) {
+                // 检查 outline 是否启用、有内容、且在轮数限制内
+                const shouldInjectToLLM = settings.outlineEnabled
+                    && settings.outline?.trim()
+                    && settings.currentRound <= settings.outlinePromptRounds;
+
+                if (shouldInjectToLLM) {
                     messages.push({
                         role: 'system',
                         content: `[Plot Outline]\n${settings.outline.trim()}`,
@@ -1279,6 +1285,16 @@ function bindSettingsUI(settings) {
         outlineEl.value = settings.outline;
         outlineEl.addEventListener('input', () => {
             settings.outline = outlineEl.value;
+            saveSettings();
+        });
+    }
+
+    // Outline prompt rounds (inject to LLM)
+    const outlinePromptRoundsEl = document.getElementById('st_pd_outline_prompt_rounds');
+    if (outlinePromptRoundsEl) {
+        outlinePromptRoundsEl.value = settings.outlinePromptRounds ?? 999; // 向后兼容
+        outlinePromptRoundsEl.addEventListener('change', () => {
+            settings.outlinePromptRounds = parseInt(outlinePromptRoundsEl.value) || 0;
             saveSettings();
         });
     }

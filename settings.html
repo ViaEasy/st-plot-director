@@ -199,8 +199,15 @@
         </div>
 
         <div class="st-pd-row">
-            <label data-i18n="Inject Outline Rounds">Inject into first N rounds</label>
-            <input type="number" id="st_pd_outline_inject_rounds" min="0" max="100" value="1" title="0 = never inject, 1 = first round only, etc." />
+            <label title="控制 outline 注入到导演 LLM prompt 的轮数">注入到导演 LLM 的轮数</label>
+            <input type="number" id="st_pd_outline_prompt_rounds" min="0" max="999" value="999"
+                   title="999 = 始终注入, 1-998 = 仅在前 N 轮注入, 0 = 永不注入" />
+        </div>
+
+        <div class="st-pd-row">
+            <label title="控制 outline 注入到用户消息的轮数">注入到用户消息的轮数</label>
+            <input type="number" id="st_pd_outline_inject_rounds" min="0" max="100" value="1"
+                   title="0 = 不注入, 1 = 仅第 1 轮, N = 前 N 轮" />
         </div>
 
         <textarea class="st-pd-outline-textarea text_pole" id="st_pd_outline" placeholder="Enter your plot outline here..."></textarea>
