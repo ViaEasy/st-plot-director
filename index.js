@@ -117,6 +117,14 @@ const defaultSettings = Object.freeze({
     apiConfigs: {},
     selectedApiConfig: '',
     regexRules: [],
+    uiState: {
+        activeTab: 'basic',
+        collapsedSections: {
+            'input-log': true,
+            'llm-output': true,
+            'log': true,
+        },
+    },
 });
 
 let isProcessing = false;
@@ -1858,6 +1866,86 @@ function bindPresetUI(settings) {
     });
 }
 
+// ---- Tab System ----
+
+function initTabSystem() {
+    const tabs = document.querySelectorAll('.st-pd-tab');
+    const tabContents = document.querySelectorAll('.st-pd-tab-content');
+
+    tabs.forEach(tab => {
+        tab.addEventListener('click', () => {
+            const tabName = tab.dataset.tab;
+
+            // 移除所有 active 类
+            tabs.forEach(t => t.classList.remove('active'));
+            tabContents.forEach(tc => tc.classList.remove('active'));
+
+            // 添加 active 类到当前标签
+            tab.classList.add('active');
+            const targetContent = document.querySelector(`[data-tab-content="${tabName}"]`);
+            if (targetContent) {
+                targetContent.classList.add('active');
+            }
+
+            // 保存状态
+            const settings = getSettings();
+            if (!settings.uiState) {
+                settings.uiState = { activeTab: 'basic', collapsedSections: {} };
+            }
+            settings.uiState.activeTab = tabName;
+            saveSettings();
+        });
+    });
+
+    // 恢复上次的标签页
+    const settings = getSettings();
+    const activeTab = settings.uiState?.activeTab || 'basic';
+    const activeTabEl = document.querySelector(`[data-tab="${activeTab}"]`);
+    if (activeTabEl) {
+        activeTabEl.click();
+    }
+}
+
+// ---- Collapsible Sections ----
+
+function initCollapsibleSections() {
+    const headers = document.querySelectorAll('.st-pd-section-header[data-collapsible="true"]');
+
+    headers.forEach(header => {
+        header.addEventListener('click', () => {
+            const section = header.closest('.st-pd-section');
+            const sectionId = section.dataset.sectionId;
+
+            // 切换折叠状态
+            section.classList.toggle('collapsed');
+
+            // 保存状态
+            const settings = getSettings();
+            if (!settings.uiState) {
+                settings.uiState = { activeTab: 'basic', collapsedSections: {} };
+            }
+            if (!settings.uiState.collapsedSections) {
+                settings.uiState.collapsedSections = {};
+            }
+            settings.uiState.collapsedSections[sectionId] =
+                section.classList.contains('collapsed');
+            saveSettings();
+        });
+    });
+
+    // 恢复折叠状态
+    const settings = getSettings();
+    const collapsed = settings.uiState?.collapsedSections || {};
+    Object.entries(collapsed).forEach(([sectionId, isCollapsed]) => {
+        if (isCollapsed) {
+            const section = document.querySelector(`[data-section-id="${sectionId}"]`);
+            if (section) {
+                section.classList.add('collapsed');
+            }
+        }
+    });
+}
+
 // ---- Initialization ----
 
 jQuery(async function () {
@@ -1887,6 +1975,12 @@ jQuery(async function () {
 
         bindSettingsUI(settings);
         updateStatusUI(settings);
+
+        // 初始化标签页系统
+        initTabSystem();
+
+        // 初始化可折叠区域
+        initCollapsibleSections();
 
         if (settings.running) {
             settings.running = false;

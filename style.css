@@ -420,3 +420,122 @@
     border-color: #f44336 !important;
     box-shadow: 0 0 3px rgba(244, 67, 54, 0.5);
 }
+
+/* 标签页样式 */
+.st-pd-tabs {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 12px;
+    border-bottom: 2px solid var(--SmartThemeBorderColor);
+}
+
+.st-pd-tab {
+    padding: 8px 16px;
+    cursor: pointer;
+    border-radius: 5px 5px 0 0;
+    background: var(--SmartThemeBlurTintColor);
+    opacity: 0.6;
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.9em;
+}
+
+.st-pd-tab:hover {
+    opacity: 0.8;
+}
+
+.st-pd-tab.active {
+    opacity: 1;
+    background: var(--SmartThemeBodyColor);
+    color: var(--SmartThemeBlurTintColor);
+    border-bottom: 2px solid var(--SmartThemeEmColor);
+}
+
+.st-pd-tab-content {
+    display: none;
+}
+
+.st-pd-tab-content.active {
+    display: block;
+}
+
+/* 可折叠区域样式 */
+.st-pd-section-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    user-select: none;
+    padding: 4px 0;
+}
+
+.st-pd-section-header:hover {
+    opacity: 0.8;
+}
+
+.st-pd-collapse-icon {
+    font-size: 0.8em;
+    transition: transform 0.2s;
+}
+
+.st-pd-section.collapsed .st-pd-collapse-icon {
+    transform: rotate(-90deg);
+}
+
+.st-pd-section.collapsed .st-pd-section-body {
+    display: none;
+}
+
+.st-pd-section-body {
+    margin-top: 8px;
+}
+
+/* 帮助内容样式 */
+.st-pd-help-section {
+    margin-bottom: 20px;
+    padding: 12px;
+    background: var(--SmartThemeBlurTintColor);
+    border-radius: 5px;
+}
+
+.st-pd-help-section h3 {
+    margin-top: 0;
+    margin-bottom: 12px;
+    color: var(--SmartThemeEmColor);
+}
+
+.st-pd-help-section ol,
+.st-pd-help-section ul {
+    margin: 8px 0;
+    padding-left: 24px;
+}
+
+.st-pd-help-section li {
+    margin-bottom: 6px;
+    line-height: 1.5;
+}
+
+.st-pd-help-section details {
+    margin-bottom: 8px;
+    padding: 8px;
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 3px;
+}
+
+.st-pd-help-section summary {
+    cursor: pointer;
+    font-weight: bold;
+    padding: 4px;
+}
+
+.st-pd-help-section summary:hover {
+    opacity: 0.8;
+}
+
+.st-pd-help-section details p {
+    margin: 8px 0 0 0;
+    padding-left: 8px;
+    border-left: 2px solid var(--SmartThemeEmColor);
+}

@@ -7,6 +7,24 @@
         <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
     </div>
     <div class="inline-drawer-content">
+        <!-- 标签页导航 -->
+        <div class="st-pd-tabs">
+            <div class="st-pd-tab active" data-tab="basic">
+                <i class="fa-solid fa-sliders"></i> 基础配置
+            </div>
+            <div class="st-pd-tab" data-tab="advanced">
+                <i class="fa-solid fa-gears"></i> 高级配置
+            </div>
+            <div class="st-pd-tab" data-tab="logs">
+                <i class="fa-solid fa-chart-line"></i> 日志输出
+            </div>
+            <div class="st-pd-tab" data-tab="help">
+                <i class="fa-solid fa-circle-question"></i> 帮助
+            </div>
+        </div>
+
+        <!-- 标签页内容：基础配置 -->
+        <div class="st-pd-tab-content active" data-tab-content="basic">
 <div class="st-pd-settings">
     <!-- Basic Settings -->
     <div class="st-pd-section">
@@ -152,8 +170,12 @@
             <div class="menu_button" id="st_pd_preset_save"><i class="fa-solid fa-floppy-disk"></i> Save Preset</div>
         </div>
     </div>
+</div>
+        </div>
 
-    <!-- Prompt Manager -->
+        <!-- 标签页内容：高级配置 -->
+        <div class="st-pd-tab-content" data-tab-content="advanced">
+<div class="st-pd-settings">
     <div class="st-pd-section">
         <div class="st-pd-section-title">
             <i class="fa-solid fa-bars-staggered"></i>
@@ -230,40 +252,106 @@
 
         <textarea class="st-pd-outline-textarea text_pole" id="st_pd_outline" placeholder="Enter your plot outline here..."></textarea>
     </div>
-
-    <!-- Input Log -->
-    <div class="st-pd-section">
-        <div class="st-pd-section-title">
-            <i class="fa-solid fa-paper-plane"></i>
-            <span data-i18n="Input Log">Input Log</span>
+</div>
         </div>
-        <textarea class="st-pd-llm-output text_pole" id="st_pd_input_log" rows="10" readonly placeholder="The messages sent to the director LLM will appear here..."></textarea>
+
+        <!-- 标签页内容：日志输出 -->
+        <div class="st-pd-tab-content" data-tab-content="logs">
+<div class="st-pd-settings">
+    <!-- Input Log -->
+    <div class="st-pd-section" data-section-id="input-log">
+        <div class="st-pd-section-header" data-collapsible="true">
+            <i class="fa-solid fa-chevron-down st-pd-collapse-icon"></i>
+            <div class="st-pd-section-title">
+                <i class="fa-solid fa-paper-plane"></i>
+                <span data-i18n="Input Log">Input Log</span>
+            </div>
+        </div>
+        <div class="st-pd-section-body">
+            <textarea class="st-pd-llm-output text_pole" id="st_pd_input_log" rows="10" readonly placeholder="The messages sent to the director LLM will appear here..."></textarea>
+        </div>
     </div>
 
     <!-- LLM Output -->
-    <div class="st-pd-section">
-        <div class="st-pd-section-title">
-            <i class="fa-solid fa-robot"></i>
-            <span data-i18n="Director LLM Output">Director LLM Output</span>
+    <div class="st-pd-section" data-section-id="llm-output">
+        <div class="st-pd-section-header" data-collapsible="true">
+            <i class="fa-solid fa-chevron-down st-pd-collapse-icon"></i>
+            <div class="st-pd-section-title">
+                <i class="fa-solid fa-robot"></i>
+                <span data-i18n="Director LLM Output">Director LLM Output</span>
+            </div>
         </div>
-        <textarea class="st-pd-llm-output text_pole" id="st_pd_llm_output" rows="6" readonly placeholder="The latest director LLM response will appear here..."></textarea>
+        <div class="st-pd-section-body">
+            <textarea class="st-pd-llm-output text_pole" id="st_pd_llm_output" rows="6" readonly placeholder="The latest director LLM response will appear here..."></textarea>
+        </div>
     </div>
 
     <!-- Log -->
-    <div class="st-pd-section">
-        <div class="st-pd-section-title">
-            <i class="fa-solid fa-terminal"></i>
-            <span data-i18n="Log">Log</span>
+    <div class="st-pd-section" data-section-id="log">
+        <div class="st-pd-section-header" data-collapsible="true">
+            <i class="fa-solid fa-chevron-down st-pd-collapse-icon"></i>
+            <div class="st-pd-section-title">
+                <i class="fa-solid fa-terminal"></i>
+                <span data-i18n="Log">Log</span>
+            </div>
         </div>
-        <div class="st-pd-btn-row" style="margin-bottom: 6px;">
-            <div class="menu_button" id="st_pd_log_filter_all">全部</div>
-            <div class="menu_button" id="st_pd_log_filter_warn">仅警告</div>
-            <div class="menu_button" id="st_pd_log_filter_error">仅错误</div>
-            <div class="menu_button" id="st_pd_log_export" data-i18n="Export Log">Export Log</div>
-            <div class="menu_button" id="st_pd_log_clear" data-i18n="Clear Log">Clear Log</div>
+        <div class="st-pd-section-body">
+            <div class="st-pd-btn-row" style="margin-bottom: 6px;">
+                <div class="menu_button" id="st_pd_log_filter_all">全部</div>
+                <div class="menu_button" id="st_pd_log_filter_warn">仅警告</div>
+                <div class="menu_button" id="st_pd_log_filter_error">仅错误</div>
+                <div class="menu_button" id="st_pd_log_export" data-i18n="Export Log">Export Log</div>
+                <div class="menu_button" id="st_pd_log_clear" data-i18n="Clear Log">Clear Log</div>
+            </div>
+            <textarea class="st-pd-log-textarea text_pole" id="st_pd_log" rows="12" readonly placeholder="Log output..."></textarea>
         </div>
-        <textarea class="st-pd-log-textarea text_pole" id="st_pd_log" rows="12" readonly placeholder="Log output..."></textarea>
     </div>
+</div>
+        </div>
+
+        <!-- 标签页内容：帮助 -->
+        <div class="st-pd-tab-content" data-tab-content="help">
+<div class="st-pd-settings">
+    <div class="st-pd-help-section">
+        <h3>🚀 快速入门</h3>
+        <ol>
+            <li>在「基础配置」中启用插件</li>
+            <li>在「API 配置」中选择快速模板或手动配置</li>
+            <li>在「系统提示词预设」中编写导演 LLM 的指令</li>
+            <li>点击「开始」按钮启动自动剧情生成</li>
+        </ol>
+    </div>
+
+    <div class="st-pd-help-section">
+        <h3>💡 功能说明</h3>
+        <ul>
+            <li><strong>Prompt Manager</strong>：自定义发送给导演 LLM 的消息结构</li>
+            <li><strong>Regex Filters</strong>：使用正则表达式过滤 LLM 输出</li>
+            <li><strong>Plot Outline</strong>：提供剧情大纲引导生成方向</li>
+        </ul>
+    </div>
+
+    <div class="st-pd-help-section">
+        <h3>❓ 常见问题</h3>
+        <details>
+            <summary>为什么导演 LLM 没有响应？</summary>
+            <p>请检查：1) API 配置是否正确 2) API Key 是否有效 3) 模型名称是否正确</p>
+        </details>
+        <details>
+            <summary>如何使用 Proxy 模式？</summary>
+            <p>选择「Via SillyTavern Proxy」连接模式，插件将使用 SillyTavern 的代理设置。</p>
+        </details>
+        <details>
+            <summary>什么是 Prompt Manager？</summary>
+            <p>Prompt Manager 允许你自定义发送给导演 LLM 的消息结构，包括系统提示词、聊天历史、剧情大纲等。你可以调整顺序、启用/禁用特定块。</p>
+        </details>
+        <details>
+            <summary>Regex Filters 如何使用？</summary>
+            <p>Regex Filters 可以对导演 LLM 的输出进行正则表达式替换，例如去除旁白、统一标点符号等。支持拖拽排序和启用/禁用。</p>
+        </details>
+    </div>
+</div>
+        </div>
 </div>
     </div>
 </div>
